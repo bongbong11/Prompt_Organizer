@@ -84,11 +84,48 @@ function makeId() {
 }
 
 function promptDefinitions() {
-    const prompts = context().chatCompletionSettings?.prompts;
+    const settings = context().chatCompletionSettings;
+    const prompts = settings?.prompts;
     if (!Array.isArray(prompts)) return [];
-    return prompts
-        .filter(prompt => prompt?.identifier)
-        .map(prompt => ({ id: String(prompt.identifier), name: String(prompt.name || prompt.identifier) }));
+
+    const byId = new Map();
+    for (const prompt of prompts) {
+        if (!prompt?.identifier) continue;
+        const id = String(prompt.identifier);
+        byId.set(id, { id, name: String(prompt.name || prompt.identifier) });
+    }
+
+    /*
+     * SillyTavern's Chat Completion Prompt Manager uses the global prompt-order
+     * entry (dummy character id 100000). `prompts` itself is only the prompt
+     * definition store and is not guaranteed to be in the visible preset order.
+     */
+    const orderLists = Array.isArray(settings?.prompt_order) ? settings.prompt_order : [];
+    const globalOrder = orderLists.find(list => String(list?.character_id) === '100000')?.order;
+    const characterOrder = orderLists.find(list => String(list?.character_id) === String(context().characterId))?.order;
+    const order = Array.isArray(globalOrder) && globalOrder.length
+        ? globalOrder
+        : (Array.isArray(characterOrder) ? characterOrder : []);
+
+    if (!order.length) return [...byId.values()];
+
+    const result = [];
+    const seen = new Set();
+    for (const entry of order) {
+        const id = String(entry?.identifier ?? '');
+        const prompt = byId.get(id);
+        if (!prompt || seen.has(id)) continue;
+        result.push(prompt);
+        seen.add(id);
+    }
+
+    /* Keep any newly-created prompt that has not reached prompt_order yet, without
+       disturbing the order of prompts that SillyTavern already knows about. */
+    for (const [id, prompt] of byId) {
+        if (!seen.has(id)) result.push(prompt);
+    }
+
+    return result;
 }
 
 function promptDomItems() {

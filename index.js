@@ -95,11 +95,6 @@ function promptDefinitions() {
         byId.set(id, { id, name: String(prompt.name || prompt.identifier) });
     }
 
-    /*
-     * SillyTavern's Chat Completion Prompt Manager uses the global prompt-order
-     * entry (dummy character id 100000). `prompts` itself is only the prompt
-     * definition store and is not guaranteed to be in the visible preset order.
-     */
     const orderLists = Array.isArray(settings?.prompt_order) ? settings.prompt_order : [];
     const globalOrder = orderLists.find(list => String(list?.character_id) === '100000')?.order;
     const characterOrder = orderLists.find(list => String(list?.character_id) === String(context().characterId))?.order;
@@ -119,8 +114,6 @@ function promptDefinitions() {
         seen.add(id);
     }
 
-    /* Keep any newly-created prompt that has not reached prompt_order yet, without
-       disturbing the order of prompts that SillyTavern already knows about. */
     for (const [id, prompt] of byId) {
         if (!seen.has(id)) result.push(prompt);
     }
@@ -215,15 +208,28 @@ function attachPromptObserver() {
 }
 
 function ensureLaunchers() {
-    const wand = document.getElementById('extensionsMenuButton');
-    if (wand && !document.getElementById(TOOLBAR_ID)) {
+    /* Remove the old chat-input document launcher from earlier versions. */
+    document.getElementById(TOOLBAR_ID)?.remove();
+
+    /* Put the organizer beside SillyTavern's character/group management control. */
+    const anchor = document.getElementById('rm_button_characters') || document.getElementById('rm_button_selected_ch');
+    if (anchor && !document.getElementById('prompt-organizer-management-button')) {
         const button = document.createElement('div');
-        button.id = TOOLBAR_ID;
-        button.className = 'fa-solid fa-file-lines interactable po-launcher';
+        button.id = 'prompt-organizer-management-button';
+        button.className = `${anchor.className || ''} po-management-launcher interactable`;
         button.title = '프롬프트 정리';
         button.setAttribute('aria-label', '프롬프트 정리');
+        button.setAttribute('role', 'button');
+        button.tabIndex = 0;
+        button.innerHTML = '<i class="fa-solid fa-layer-group"></i>';
         button.addEventListener('click', openManager);
-        wand.after(button);
+        button.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openManager();
+            }
+        });
+        anchor.after(button);
     }
 
     const menu = document.getElementById('extensionsMenu');
@@ -232,7 +238,7 @@ function ensureLaunchers() {
         item.id = WAND_ID;
         item.className = 'list-group-item flex-container flexGap5 interactable';
         item.tabIndex = 0;
-        item.innerHTML = '<i class="fa-solid fa-file-lines fa-fw"></i><span>프롬프트 정리</span>';
+        item.innerHTML = '<i class="fa-solid fa-layer-group fa-fw"></i><span>프롬프트 정리</span>';
         item.addEventListener('click', openManager);
         item.addEventListener('keydown', event => {
             if (event.key === 'Enter' || event.key === ' ') openManager();

@@ -7,7 +7,7 @@ const MODAL_ID = 'prompt-organizer-modal';
 const WAND_ID = 'prompt-organizer-wand-item';
 const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
-const SETTINGS_VERSION = 7;
+const SETTINGS_VERSION = 8;
 
 const defaults = { version: SETTINGS_VERSION, groupsByPreset: {} };
 
@@ -119,6 +119,99 @@ function promptName(id) {
     return availablePrompts().find(prompt => prompt.id === id)?.name || id || '없음';
 }
 
+function clampSlot(value, length) {
+    const slot = Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : length;
+    return Math.max(0, Math.min(length, slot));
+}
+
+function placementFromAnchor(anchor, position, ids) {
+    const anchorIndex = ids.indexOf(String(anchor || ''));
+    if (anchorIndex < 0) return null;
+    const normalizedPosition = position === 'after' ? 'after' : 'before';
+    const slot = anchorIndex + (normalizedPosition === 'after' ? 1 : 0);
+    return {
+        slot,
+        prevPromptId: slot > 0 ? ids[slot - 1] : null,
+        nextPromptId: slot < ids.length ? ids[slot] : null,
+    };
+}
+
+function applyGroupPlacement(group, anchor, position) {
+    const ids = availablePrompts().map(prompt => prompt.id);
+    const placement = placementFromAnchor(anchor, position, ids);
+    if (!placement) return false;
+    group.anchor = String(anchor);
+    group.position = position === 'after' ? 'after' : 'before';
+    group.slot = placement.slot;
+    group.prevPromptId = placement.prevPromptId;
+    group.nextPromptId = placement.nextPromptId;
+    return true;
+}
+
+function ensureGroupPlacement(group, ids) {
+    const hasSlot = Number.isInteger(group.slot);
+    const hasBoundary = Object.prototype.hasOwnProperty.call(group, 'prevPromptId')
+        || Object.prototype.hasOwnProperty.call(group, 'nextPromptId');
+    if (hasSlot && hasBoundary) return false;
+
+    let placement = placementFromAnchor(group.anchor, group.position, ids);
+    if (!placement) {
+        const memberIndexes = (group.members || [])
+            .map(id => ids.indexOf(String(id)))
+            .filter(index => index >= 0);
+        const slot = memberIndexes.length
+            ? Math.min(...memberIndexes)
+            : clampSlot(group.slot, ids.length);
+        placement = {
+            slot,
+            prevPromptId: slot > 0 ? ids[slot - 1] : null,
+            nextPromptId: slot < ids.length ? ids[slot] : null,
+        };
+    }
+
+    group.slot = placement.slot;
+    group.prevPromptId = placement.prevPromptId;
+    group.nextPromptId = placement.nextPromptId;
+    return true;
+}
+
+function resolveGroupSlot(group, ids) {
+    const savedSlot = clampSlot(group.slot, ids.length);
+    const prevIndex = group.prevPromptId ? ids.indexOf(String(group.prevPromptId)) : -1;
+    const nextIndex = group.nextPromptId ? ids.indexOf(String(group.nextPromptId)) : -1;
+
+    if (prevIndex >= 0 && nextIndex >= 0 && prevIndex < nextIndex) {
+        return nextIndex;
+    }
+    if (prevIndex >= 0 && nextIndex < 0) {
+        return Math.min(ids.length, prevIndex + 1);
+    }
+    if (nextIndex >= 0 && prevIndex < 0) {
+        return nextIndex;
+    }
+    if (prevIndex >= 0 && nextIndex >= 0) {
+        const candidates = [Math.min(ids.length, prevIndex + 1), nextIndex];
+        candidates.sort((a, b) => Math.abs(a - savedSlot) - Math.abs(b - savedSlot));
+        return candidates[0];
+    }
+
+    const legacy = placementFromAnchor(group.anchor, group.position, ids);
+    if (legacy) return legacy.slot;
+
+    const memberIndexes = (group.members || [])
+        .map(id => ids.indexOf(String(id)))
+        .filter(index => index >= 0);
+    if (memberIndexes.length) return Math.min(...memberIndexes);
+
+    return savedSlot;
+}
+
+function placementSummary(group) {
+    const anchor = availablePrompts().find(prompt => prompt.id === group.anchor);
+    if (anchor) return `${anchor.name} · ${group.position === 'after' ? '뒤' : '앞'}`;
+    return '기준 프롬프트 삭제됨 · 위치 유지';
+}
+
 function clearDecorations() {
     document.querySelectorAll(`.${DIVIDER_CLASS}`).forEach(el => el.remove());
     document.querySelectorAll(`.${HIDDEN_CLASS}`).forEach(el => el.classList.remove(HIDDEN_CLASS));
@@ -137,10 +230,15 @@ function renderPromptManager() {
     promptObserver?.disconnect();
     clearDecorations();
 
-    const map = new Map(promptDomItems().map(item => [item.id, item.el]));
+    const items = promptDomItems();
+    const ids = items.map(item => item.id);
+    const map = new Map(items.map(item => [item.id, item.el]));
+    const slotMap = new Map();
+    let placementMigrated = false;
+
     for (const group of currentGroups()) {
-        const anchor = map.get(group.anchor);
-        if (!anchor) continue;
+        if (ensureGroupPlacement(group, ids)) placementMigrated = true;
+        const slot = resolveGroupSlot(group, ids);
 
         const divider = document.createElement('div');
         divider.className = `${DIVIDER_CLASS}${group.collapsible ? ' po-collapsible' : ''}`;
@@ -151,7 +249,9 @@ function renderPromptManager() {
             <span class="po-divider-title">${escapeHtml(group.name || '구분선')}</span>
             <span class="po-divider-line"></span>`;
 
-        group.position === 'after' ? anchor.after(divider) : anchor.before(divider);
+        if (!slotMap.has(slot)) slotMap.set(slot, []);
+        slotMap.get(slot).push(divider);
+
         if (group.collapsible && group.collapsed) {
             for (const id of group.members || []) map.get(id)?.classList.add(HIDDEN_CLASS);
         }
@@ -163,6 +263,14 @@ function renderPromptManager() {
         });
     }
 
+    for (const slot of [...slotMap.keys()].sort((a, b) => a - b)) {
+        const target = items[slot]?.el || null;
+        for (const divider of slotMap.get(slot)) {
+            target ? target.before(divider) : list.append(divider);
+        }
+    }
+
+    if (placementMigrated) save(false);
     rendering = false;
     attachPromptObserver();
 }
@@ -258,7 +366,12 @@ function renderActiveTab() {
 }
 
 function promptOptions(selectedId = '') {
-    return availablePrompts().map(prompt => `<option value="${escapeHtml(prompt.id)}" ${prompt.id === selectedId ? 'selected' : ''}>${escapeHtml(prompt.name)}</option>`).join('');
+    const prompts = availablePrompts();
+    const selectedExists = !selectedId || prompts.some(prompt => prompt.id === selectedId);
+    const missing = selectedId && !selectedExists
+        ? `<option value="${escapeHtml(selectedId)}" selected disabled>(삭제됨 · 현재 위치 유지)</option>`
+        : '';
+    return missing + prompts.map(prompt => `<option value="${escapeHtml(prompt.id)}" ${prompt.id === selectedId ? 'selected' : ''}>${escapeHtml(prompt.name)}</option>`).join('');
 }
 
 function memberOptions(selected = []) {
@@ -297,16 +410,19 @@ function renderCreateTab(content) {
 
     content.querySelector('.po-create-save')?.addEventListener('click', () => {
         const anchor = content.querySelector('.po-new-anchor')?.value || '';
+        const position = content.querySelector('.po-new-position')?.value === 'after' ? 'after' : 'before';
         if (!anchor) return;
-        currentGroups().push({
+        const group = {
             id: makeId(),
             name: content.querySelector('.po-new-name')?.value?.trim() || '새 구분선',
             anchor,
-            position: content.querySelector('.po-new-position')?.value === 'after' ? 'after' : 'before',
+            position,
             collapsible: Boolean(content.querySelector('.po-new-collapsible')?.checked),
             collapsed: false,
             members: [...content.querySelectorAll('.po-new-members input:checked')].map(el => el.value),
-        });
+        };
+        applyGroupPlacement(group, anchor, position);
+        currentGroups().push(group);
         save();
         schedulePromptRender();
         activeTab = 'saved';
@@ -331,7 +447,7 @@ function renderSavedTab(content) {
             <div class="po-saved-summary">
                 <button type="button" class="po-saved-main po-edit-toggle" aria-expanded="false">
                     <span class="po-saved-name">${escapeHtml(group.name || '구분선')}</span>
-                    <span class="po-saved-meta">${escapeHtml(promptName(group.anchor))} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}</span>
+                    <span class="po-saved-meta">${escapeHtml(placementSummary(group))} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}</span>
                 </button>
                 <button type="button" class="po-small-button po-edit-toggle" aria-label="수정"><i class="fa-solid fa-pen"></i></button>
                 <button type="button" class="po-small-button po-delete-saved" aria-label="삭제"><i class="fa-solid fa-trash"></i></button>
@@ -362,7 +478,7 @@ function bindSavedItem(item, group, index) {
     const toggles = item.querySelectorAll('.po-edit-toggle');
     const updateSummary = () => {
         item.querySelector('.po-saved-name').textContent = group.name || '구분선';
-        item.querySelector('.po-saved-meta').textContent = `${promptName(group.anchor)} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
+        item.querySelector('.po-saved-meta').textContent = `${placementSummary(group)} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
     };
     const setOpen = open => {
         panel.hidden = !open;
@@ -376,11 +492,12 @@ function bindSavedItem(item, group, index) {
         save(); updateSummary(); schedulePromptRender();
     });
     item.querySelector('.po-anchor')?.addEventListener('change', event => {
-        group.anchor = event.target.value;
+        applyGroupPlacement(group, event.target.value, group.position);
         save(); updateSummary(); schedulePromptRender();
     });
     item.querySelector('.po-position')?.addEventListener('change', event => {
-        group.position = event.target.value;
+        const nextPosition = event.target.value === 'after' ? 'after' : 'before';
+        if (!applyGroupPlacement(group, group.anchor, nextPosition)) group.position = nextPosition;
         save(); updateSummary(); schedulePromptRender();
     });
     item.querySelector('.po-collapsible')?.addEventListener('change', event => {

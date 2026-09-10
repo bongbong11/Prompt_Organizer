@@ -4,11 +4,11 @@ export default 'Prompt Organizer';
 
 const KEY = 'promptOrganizer';
 const MODAL_ID = 'prompt-organizer-modal';
-const MANAGEMENT_BUTTON_ID = 'prompt-organizer-management-button';
+const BUTTON_ID = 'prompt-organizer-management-button';
 const WAND_ID = 'prompt-organizer-wand-item';
 const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
-const SETTINGS_VERSION = 5;
+const SETTINGS_VERSION = 6;
 
 const defaults = { version: SETTINGS_VERSION, groupsByPreset: {} };
 
@@ -28,31 +28,11 @@ function store() {
     return c.extensionSettings[KEY];
 }
 
-function migrateSettings() {
-    const data = store();
-    let changed = data.version !== SETTINGS_VERSION;
-    data.version = SETTINGS_VERSION;
-
-    for (const list of Object.values(data.groupsByPreset)) {
-        if (!Array.isArray(list)) continue;
-        for (const group of list) {
-            if ('merge' in group) { delete group.merge; changed = true; }
-            if ('role' in group) { delete group.role; changed = true; }
-        }
-    }
-
-    if (changed) save(false);
-}
-
 function save(showState = true) {
     context().saveSettingsDebounced();
-    if (showState) showSavedState();
-}
-
-function showSavedState() {
+    if (!showState) return;
     const el = document.querySelector(`#${MODAL_ID} .po-save-state`);
     if (!el) return;
-
     el.textContent = '저장됨';
     el.classList.add('po-saved');
     clearTimeout(saveStateTimer);
@@ -60,6 +40,20 @@ function showSavedState() {
         el.textContent = '자동 저장';
         el.classList.remove('po-saved');
     }, 900);
+}
+
+function migrateSettings() {
+    const data = store();
+    let changed = data.version !== SETTINGS_VERSION;
+    data.version = SETTINGS_VERSION;
+    for (const list of Object.values(data.groupsByPreset)) {
+        if (!Array.isArray(list)) continue;
+        for (const group of list) {
+            if ('merge' in group) { delete group.merge; changed = true; }
+            if ('role' in group) { delete group.role; changed = true; }
+        }
+    }
+    if (changed) save(false);
 }
 
 function escapeHtml(value = '') {
@@ -84,21 +78,16 @@ function currentGroups() {
 }
 
 function currentPromptEntries() {
-    if (!promptManager
-        || typeof promptManager.getPromptOrderForCharacter !== 'function'
-        || typeof promptManager.getPromptById !== 'function') {
-        return null;
+    if (!promptManager || typeof promptManager.getPromptOrderForCharacter !== 'function' || typeof promptManager.getPromptById !== 'function') {
+        return [];
     }
-
     try {
         const order = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter);
         if (!Array.isArray(order)) return [];
-
         return order.flatMap((entry, index) => {
             if (!entry?.identifier) return [];
             const prompt = promptManager.getPromptById(entry.identifier);
             if (!prompt || prompt.marker || prompt.extension) return [];
-
             return [{
                 id: String(entry.identifier),
                 name: String(prompt.name || entry.identifier),
@@ -108,26 +97,23 @@ function currentPromptEntries() {
         });
     } catch (error) {
         console.warn('[Prompt Organizer] Prompt Manager read failed:', error);
-        return null;
+        return [];
     }
 }
 
 function promptDomItems() {
     const list = document.querySelector('#completion_prompt_manager_list');
     if (!list) return [];
-
     return [...list.querySelectorAll('.completion_prompt_manager_prompt[data-pm-identifier]')].map(el => ({
         id: String(el.dataset.pmIdentifier),
-        name: el.querySelector('.completion_prompt_manager_prompt_name, .prompt_manager_prompt_name')?.textContent?.trim()
-            || String(el.dataset.pmIdentifier),
+        name: el.querySelector('.completion_prompt_manager_prompt_name, .prompt_manager_prompt_name')?.textContent?.trim() || String(el.dataset.pmIdentifier),
         el,
     }));
 }
 
 function availablePrompts() {
     const entries = currentPromptEntries();
-    if (Array.isArray(entries) && entries.length) return entries;
-    return promptDomItems().map(({ id, name }) => ({ id, name }));
+    return entries.length ? entries : promptDomItems().map(({ id, name }) => ({ id, name }));
 }
 
 function promptName(id) {
@@ -153,7 +139,6 @@ function renderPromptManager() {
     clearDecorations();
 
     const map = new Map(promptDomItems().map(item => [item.id, item.el]));
-
     for (const group of currentGroups()) {
         const anchor = map.get(group.anchor);
         if (!anchor) continue;
@@ -161,19 +146,16 @@ function renderPromptManager() {
         const divider = document.createElement('div');
         divider.className = `${DIVIDER_CLASS}${group.collapsible ? ' po-collapsible' : ''}`;
         divider.dataset.poGroup = group.id;
-        divider.innerHTML = `
-            ${group.collapsible
-                ? `<button type="button" class="po-fold" aria-label="접기/펼치기"><i class="fa-solid fa-chevron-${group.collapsed ? 'right' : 'down'}"></i></button>`
-                : '<span class="po-fold-spacer"></span>'}
+        divider.innerHTML = `${group.collapsible
+            ? `<button type="button" class="po-fold" aria-label="접기/펼치기"><i class="fa-solid fa-chevron-${group.collapsed ? 'right' : 'down'}"></i></button>`
+            : '<span class="po-fold-spacer"></span>'}
             <span class="po-divider-title">${escapeHtml(group.name || '구분선')}</span>
             <span class="po-divider-line"></span>`;
 
         group.position === 'after' ? anchor.after(divider) : anchor.before(divider);
-
         if (group.collapsible && group.collapsed) {
             for (const id of group.members || []) map.get(id)?.classList.add(HIDDEN_CLASS);
         }
-
         divider.querySelector('.po-fold')?.addEventListener('click', event => {
             event.stopPropagation();
             group.collapsed = !group.collapsed;
@@ -189,7 +171,6 @@ function renderPromptManager() {
 function attachPromptObserver() {
     const list = document.querySelector('#completion_prompt_manager_list');
     if (!list) return;
-
     if (observedPromptList !== list || !promptObserver) {
         promptObserver?.disconnect();
         observedPromptList = list;
@@ -197,55 +178,36 @@ function attachPromptObserver() {
             if (!rendering) schedulePromptRender();
         });
     }
-
     promptObserver.observe(list, { childList: true, subtree: true });
-}
-
-function openAiPresetPanel() {
-    const presetSelect = document.querySelector('#settings_perset_openai, #openai_preset, #completion_preset');
-    if (!presetSelect) return null;
-
-    return presetSelect.closest(
-        '#openai_settings, #ai_response_configuration, .inline-drawer-content, .drawer-content, .settings-content',
-    ) || presetSelect.parentElement?.parentElement || null;
-}
-
-function findToggleGroupManagementButton() {
-    const panel = openAiPresetPanel();
-    if (!panel) return null;
-
-    return [...panel.querySelectorAll('button, .menu_button, [role="button"]')].find(el => {
-        if (el.id === MANAGEMENT_BUTTON_ID) return false;
-        const text = el.textContent?.replace(/\s+/g, ' ').trim();
-        return text === '그룹 관리' || text === 'Manage groups';
-    }) || null;
-}
-
-function createManagementLauncher(anchor) {
-    const button = document.createElement('button');
-    button.id = MANAGEMENT_BUTTON_ID;
-    button.type = 'button';
-    button.className = 'menu_button po-management-launcher';
-    button.title = '프롬프트 정리';
-    button.setAttribute('aria-label', '프롬프트 정리');
-    button.innerHTML = '<i class="fa-solid fa-layer-group"></i><span>프롬프트 정리</span>';
-    button.addEventListener('click', openManager);
-    anchor.after(button);
 }
 
 function ensureLaunchers() {
     document.getElementById('prompt-organizer-toolbar-button')?.remove();
 
-    const anchor = findToggleGroupManagementButton();
-    const existing = document.getElementById(MANAGEMENT_BUTTON_ID);
+    const presetBlock = document.querySelector('#openai_api-presets');
+    const presetSelect = presetBlock?.querySelector('#settings_preset_openai');
+    const controls = presetSelect?.nextElementSibling;
+    const anchor = controls?.querySelector('#new_oai_preset') || controls?.lastElementChild;
+    const existing = document.getElementById(BUTTON_ID);
 
-    if (anchor) {
-        if (!existing || existing.previousElementSibling !== anchor) {
-            existing?.remove();
-            createManagementLauncher(anchor);
-        }
-    } else {
+    if (anchor && (!existing || existing.previousElementSibling !== anchor)) {
         existing?.remove();
+        const button = document.createElement('div');
+        button.id = BUTTON_ID;
+        button.className = 'menu_button menu_button_icon po-management-launcher';
+        button.title = '프롬프트 정리';
+        button.setAttribute('aria-label', '프롬프트 정리');
+        button.setAttribute('role', 'button');
+        button.tabIndex = 0;
+        button.innerHTML = '<i class="fa-fw fa-solid fa-layer-group"></i>';
+        button.addEventListener('click', openManager);
+        button.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openManager();
+            }
+        });
+        anchor.after(button);
     }
 
     const menu = document.getElementById('extensionsMenu');
@@ -256,12 +218,6 @@ function ensureLaunchers() {
         item.tabIndex = 0;
         item.innerHTML = '<i class="fa-solid fa-layer-group fa-fw"></i><span>프롬프트 정리</span>';
         item.addEventListener('click', openManager);
-        item.addEventListener('keydown', event => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                openManager();
-            }
-        });
         menu.append(item);
     }
 }
@@ -290,15 +246,12 @@ function openManager() {
         <section class="po-modal" role="dialog" aria-modal="true" aria-label="프롬프트 정리">
             <header class="po-modal-header">
                 <div>
-                    <div class="po-title-row">
-                        <div class="po-modal-title">프롬프트 정리</div>
-                        <span class="po-save-state">자동 저장</span>
-                    </div>
+                    <div class="po-title-row"><div class="po-modal-title">프롬프트 정리</div><span class="po-save-state">자동 저장</span></div>
                     <div class="po-preset-line">현재 프리셋 · <strong>${escapeHtml(currentPresetName())}</strong></div>
                 </div>
                 <button type="button" class="po-icon-button po-close" aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
             </header>
-            <nav class="po-tabs" aria-label="프롬프트 정리 탭">
+            <nav class="po-tabs">
                 <button type="button" class="po-tab" data-tab="create"><i class="fa-solid fa-plus"></i> 새 구분선</button>
                 <button type="button" class="po-tab" data-tab="saved"><i class="fa-solid fa-folder-open"></i> 저장된 구분선 <span class="po-tab-count">0</span></button>
             </nav>
@@ -307,13 +260,11 @@ function openManager() {
 
     document.body.append(overlay);
     document.body.classList.add('po-modal-open');
-
     overlay.querySelector('.po-close').addEventListener('click', closeManager);
     overlay.querySelectorAll('.po-tab').forEach(button => button.addEventListener('click', () => {
         activeTab = button.dataset.tab;
         renderActiveTab();
     }));
-
     renderActiveTab();
 }
 
@@ -327,29 +278,21 @@ function renderActiveTab() {
         button.classList.toggle('po-active', active);
         button.setAttribute('aria-selected', String(active));
     });
-
     const count = overlay.querySelector('.po-tab-count');
     if (count) count.textContent = String(currentGroups().length);
-
     activeTab === 'saved' ? renderSavedTab(content) : renderCreateTab(content);
 }
 
 function promptOptions(selectedId = '') {
-    return availablePrompts()
-        .map(prompt => `<option value="${escapeHtml(prompt.id)}" ${prompt.id === selectedId ? 'selected' : ''}>${escapeHtml(prompt.name)}</option>`)
-        .join('');
+    return availablePrompts().map(prompt => `<option value="${escapeHtml(prompt.id)}" ${prompt.id === selectedId ? 'selected' : ''}>${escapeHtml(prompt.name)}</option>`).join('');
 }
 
 function memberOptions(selected = []) {
-    return availablePrompts()
-        .map(prompt => `<label class="po-member"><input type="checkbox" value="${escapeHtml(prompt.id)}" ${selected.includes(prompt.id) ? 'checked' : ''}><span>${escapeHtml(prompt.name)}</span></label>`)
-        .join('');
+    return availablePrompts().map(prompt => `<label class="po-member"><input type="checkbox" value="${escapeHtml(prompt.id)}" ${selected.includes(prompt.id) ? 'checked' : ''}><span>${escapeHtml(prompt.name)}</span></label>`).join('');
 }
 
 function renderCreateTab(content) {
-    const prompts = availablePrompts();
-    const firstPrompt = prompts[0];
-
+    const firstPrompt = availablePrompts()[0];
     content.innerHTML = `
         <section class="po-create-card">
             <div class="po-create-grid">
@@ -367,7 +310,7 @@ function renderCreateTab(content) {
                 </div>
             </div>
             <div class="po-create-actions">
-                <span class="po-hint">현재 OpenAI 프리셋의 화면 구분 설정으로 저장돼.</span>
+                <span class="po-hint">현재 Chat Completion 프리셋의 화면 구분 설정으로 저장돼.</span>
                 <button type="button" class="menu_button po-create-save" ${firstPrompt ? '' : 'disabled'}><i class="fa-solid fa-check"></i> 구분선 저장</button>
             </div>
         </section>`;
@@ -381,7 +324,6 @@ function renderCreateTab(content) {
     content.querySelector('.po-create-save')?.addEventListener('click', () => {
         const anchor = content.querySelector('.po-new-anchor')?.value || '';
         if (!anchor) return;
-
         currentGroups().push({
             id: makeId(),
             name: content.querySelector('.po-new-name')?.value?.trim() || '새 구분선',
@@ -391,7 +333,6 @@ function renderCreateTab(content) {
             collapsed: false,
             members: [...content.querySelectorAll('.po-new-members input:checked')].map(el => el.value),
         });
-
         save();
         schedulePromptRender();
         activeTab = 'saved';
@@ -437,7 +378,6 @@ function renderSavedTab(content) {
                     </div>
                 </div>
             </div>`;
-
         list.append(item);
         bindSavedItem(item, group, index);
     });
@@ -446,63 +386,43 @@ function renderSavedTab(content) {
 function bindSavedItem(item, group, index) {
     const panel = item.querySelector('.po-edit-panel');
     const toggles = item.querySelectorAll('.po-edit-toggle');
-
+    const updateSummary = () => {
+        item.querySelector('.po-saved-name').textContent = group.name || '구분선';
+        item.querySelector('.po-saved-meta').textContent = `${promptName(group.anchor)} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
+    };
     const setOpen = open => {
         panel.hidden = !open;
         item.classList.toggle('po-editing', open);
         toggles.forEach(button => button.setAttribute('aria-expanded', String(open)));
     };
 
-    const updateSummary = () => {
-        item.querySelector('.po-saved-name').textContent = group.name || '구분선';
-        item.querySelector('.po-saved-meta').textContent = `${promptName(group.anchor)} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
-    };
-
     toggles.forEach(button => button.addEventListener('click', () => setOpen(panel.hidden)));
-
     item.querySelector('.po-name')?.addEventListener('input', event => {
         group.name = event.target.value;
-        save();
-        updateSummary();
-        schedulePromptRender();
+        save(); updateSummary(); schedulePromptRender();
     });
-
     item.querySelector('.po-anchor')?.addEventListener('change', event => {
         group.anchor = event.target.value;
-        save();
-        updateSummary();
-        schedulePromptRender();
+        save(); updateSummary(); schedulePromptRender();
     });
-
     item.querySelector('.po-position')?.addEventListener('change', event => {
         group.position = event.target.value;
-        save();
-        updateSummary();
-        schedulePromptRender();
+        save(); updateSummary(); schedulePromptRender();
     });
-
     item.querySelector('.po-collapsible')?.addEventListener('change', event => {
         group.collapsible = event.target.checked;
         if (!group.collapsible) group.collapsed = false;
-        save();
-        updateSummary();
-        schedulePromptRender();
+        save(); updateSummary(); schedulePromptRender();
     });
-
     item.querySelectorAll('.po-member input').forEach(input => input.addEventListener('change', () => {
         group.members = [...item.querySelectorAll('.po-member input:checked')].map(el => el.value);
         item.querySelector('.po-member-count').textContent = `${group.members.length}개`;
-        save();
-        updateSummary();
-        schedulePromptRender();
+        save(); updateSummary(); schedulePromptRender();
     }));
-
     item.querySelector('.po-delete-saved')?.addEventListener('click', () => {
         if (!confirm(`“${group.name || '구분선'}”을 삭제할까?`)) return;
         currentGroups().splice(index, 1);
-        save();
-        schedulePromptRender();
-        renderActiveTab();
+        save(); schedulePromptRender(); renderActiveTab();
     });
 }
 
@@ -516,8 +436,8 @@ function init() {
     store();
     migrateSettings();
     ensureLaunchers();
-    setTimeout(ensureLaunchers, 750);
-    setTimeout(ensureLaunchers, 2000);
+    setTimeout(ensureLaunchers, 500);
+    setTimeout(ensureLaunchers, 1500);
     attachPromptObserver();
     schedulePromptRender();
 
@@ -529,11 +449,9 @@ function init() {
         if (!overlay || event.target.closest?.('.po-modal')) return;
         closeManager();
     }, true);
-
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape' && document.getElementById(MODAL_ID)) closeManager();
     });
-
     window.visualViewport?.addEventListener('resize', setViewportMetrics);
     window.visualViewport?.addEventListener('scroll', setViewportMetrics);
     window.addEventListener('resize', setViewportMetrics);
@@ -543,3 +461,4 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init, { once: true });
 } else {
     init();
+}

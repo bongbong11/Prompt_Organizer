@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "bongbong11",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "homePage": "https://github.com/bongbong11/Prompt_Organizer",
   "auto_update": true
 }

@@ -4,11 +4,10 @@ export default 'Prompt Organizer';
 
 const KEY = 'promptOrganizer';
 const MODAL_ID = 'prompt-organizer-modal';
-const BUTTON_ID = 'prompt-organizer-management-button';
 const WAND_ID = 'prompt-organizer-wand-item';
 const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
-const SETTINGS_VERSION = 6;
+const SETTINGS_VERSION = 7;
 
 const defaults = { version: SETTINGS_VERSION, groupsByPreset: {} };
 
@@ -57,8 +56,8 @@ function migrateSettings() {
 }
 
 function escapeHtml(value = '') {
-    return String(value).replace(/[&<>'"]/g, char => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+    return String(value).replace(/[&<>'\"]/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;',
     })[char]);
 }
 
@@ -183,32 +182,7 @@ function attachPromptObserver() {
 
 function ensureLaunchers() {
     document.getElementById('prompt-organizer-toolbar-button')?.remove();
-
-    const presetBlock = document.querySelector('#openai_api-presets');
-    const presetSelect = presetBlock?.querySelector('#settings_preset_openai');
-    const controls = presetSelect?.nextElementSibling;
-    const anchor = controls?.querySelector('#new_oai_preset') || controls?.lastElementChild;
-    const existing = document.getElementById(BUTTON_ID);
-
-    if (anchor && (!existing || existing.previousElementSibling !== anchor)) {
-        existing?.remove();
-        const button = document.createElement('div');
-        button.id = BUTTON_ID;
-        button.className = 'menu_button menu_button_icon po-management-launcher';
-        button.title = '프롬프트 정리';
-        button.setAttribute('aria-label', '프롬프트 정리');
-        button.setAttribute('role', 'button');
-        button.tabIndex = 0;
-        button.innerHTML = '<i class="fa-fw fa-solid fa-layer-group"></i>';
-        button.addEventListener('click', openManager);
-        button.addEventListener('keydown', event => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                openManager();
-            }
-        });
-        anchor.after(button);
-    }
+    document.getElementById('prompt-organizer-management-button')?.remove();
 
     const menu = document.getElementById('extensionsMenu');
     if (menu && !document.getElementById(WAND_ID)) {

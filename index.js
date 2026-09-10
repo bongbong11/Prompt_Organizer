@@ -1,4 +1,4 @@
-import { getPresetManager } from '../../../preset-manager.js';
+import { oai_settings, promptManager } from '../../../openai.js';
 
 export default 'Prompt Organizer';
 
@@ -8,11 +8,10 @@ const MANAGEMENT_BUTTON_ID = 'prompt-organizer-management-button';
 const WAND_ID = 'prompt-organizer-wand-item';
 const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
-const SETTINGS_VERSION = 4;
+const SETTINGS_VERSION = 5;
 
 const defaults = { version: SETTINGS_VERSION, groupsByPreset: {} };
 
-let editorPresetName = '';
 let activeTab = 'create';
 let promptObserver = null;
 let observedPromptList = null;
@@ -21,7 +20,6 @@ let saveStateTimer = null;
 let rendering = false;
 
 const context = () => SillyTavern.getContext();
-const presetManager = () => getPresetManager('openai');
 
 function store() {
     const c = context();
@@ -38,14 +36,8 @@ function migrateSettings() {
     for (const list of Object.values(data.groupsByPreset)) {
         if (!Array.isArray(list)) continue;
         for (const group of list) {
-            if ('merge' in group) {
-                delete group.merge;
-                changed = true;
-            }
-            if ('role' in group) {
-                delete group.role;
-                changed = true;
-            }
+            if ('merge' in group) { delete group.merge; changed = true; }
+            if ('role' in group) { delete group.role; changed = true; }
         }
     }
 
@@ -72,11 +64,7 @@ function showSavedState() {
 
 function escapeHtml(value = '') {
     return String(value).replace(/[&<>'"]/g, char => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        "'": '&#39;',
-        '"': '&quot;',
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
     })[char]);
 }
 
@@ -84,75 +72,44 @@ function makeId() {
     return `po_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function presetNames() {
-    const names = presetManager()?.getAllPresets?.();
-    return Array.isArray(names) ? names.filter(Boolean).map(String) : [];
+function currentPresetName() {
+    return String(oai_settings?.preset_settings_openai || 'Default');
 }
 
-function activePresetName() {
-    return String(presetManager()?.getSelectedPresetName?.() || '');
-}
-
-function selectedPresetName() {
-    const names = presetNames();
-    if (!names.length) {
-        editorPresetName = '';
-        return '';
-    }
-
-    if (!names.includes(editorPresetName)) {
-        const active = activePresetName();
-        editorPresetName = names.includes(active) ? active : names[0];
-    }
-
-    return editorPresetName;
-}
-
-function groupsFor(preset) {
-    if (!preset) return [];
+function currentGroups() {
     const all = store().groupsByPreset;
+    const preset = currentPresetName();
     all[preset] ??= [];
     return all[preset];
 }
 
-function editorGroups() {
-    return groupsFor(selectedPresetName());
-}
-
-function presetData(name) {
-    if (!name) return null;
-    try {
-        return presetManager()?.getPresetSettings?.(name) ?? null;
-    } catch (error) {
-        console.warn('[Prompt Organizer] Failed to read preset:', name, error);
+function currentPromptEntries() {
+    if (!promptManager
+        || typeof promptManager.getPromptOrderForCharacter !== 'function'
+        || typeof promptManager.getPromptById !== 'function') {
         return null;
     }
-}
 
-function promptsForPreset(name) {
-    const data = presetData(name);
-    const definitions = Array.isArray(data?.prompts) ? data.prompts : [];
-    const byId = new Map();
+    try {
+        const order = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter);
+        if (!Array.isArray(order)) return [];
 
-    for (const prompt of definitions) {
-        if (!prompt?.identifier) continue;
-        const id = String(prompt.identifier);
-        byId.set(id, {
-            id,
-            name: String(prompt.name || prompt.identifier),
+        return order.flatMap((entry, index) => {
+            if (!entry?.identifier) return [];
+            const prompt = promptManager.getPromptById(entry.identifier);
+            if (!prompt || prompt.marker || prompt.extension) return [];
+
+            return [{
+                id: String(entry.identifier),
+                name: String(prompt.name || entry.identifier),
+                enabled: entry.enabled !== false,
+                index,
+            }];
         });
+    } catch (error) {
+        console.warn('[Prompt Organizer] Prompt Manager read failed:', error);
+        return null;
     }
-
-    const orderLists = Array.isArray(data?.prompt_order) ? data.prompt_order : [];
-    const order = orderLists.find(entry => String(entry?.character_id) === '100000')?.order;
-
-    if (!Array.isArray(order) || !order.length) {
-        return [...byId.values()];
-    }
-
-    return order
-        .map(entry => byId.get(String(entry?.identifier ?? '')))
-        .filter(Boolean);
 }
 
 function promptDomItems() {
@@ -167,12 +124,14 @@ function promptDomItems() {
     }));
 }
 
-function editorPrompts() {
-    return promptsForPreset(selectedPresetName());
+function availablePrompts() {
+    const entries = currentPromptEntries();
+    if (Array.isArray(entries) && entries.length) return entries;
+    return promptDomItems().map(({ id, name }) => ({ id, name }));
 }
 
-function editorPromptName(id) {
-    return editorPrompts().find(prompt => prompt.id === id)?.name || id || '없음';
+function promptName(id) {
+    return availablePrompts().find(prompt => prompt.id === id)?.name || id || '없음';
 }
 
 function clearDecorations() {
@@ -194,9 +153,8 @@ function renderPromptManager() {
     clearDecorations();
 
     const map = new Map(promptDomItems().map(item => [item.id, item.el]));
-    const preset = activePresetName();
 
-    for (const group of groupsFor(preset)) {
+    for (const group of currentGroups()) {
         const anchor = map.get(group.anchor);
         if (!anchor) continue;
 
@@ -213,9 +171,7 @@ function renderPromptManager() {
         group.position === 'after' ? anchor.after(divider) : anchor.before(divider);
 
         if (group.collapsible && group.collapsed) {
-            for (const id of group.members || []) {
-                map.get(id)?.classList.add(HIDDEN_CLASS);
-            }
+            for (const id of group.members || []) map.get(id)?.classList.add(HIDDEN_CLASS);
         }
 
         divider.querySelector('.po-fold')?.addEventListener('click', event => {
@@ -258,8 +214,7 @@ function findToggleGroupManagementButton() {
     const panel = openAiPresetPanel();
     if (!panel) return null;
 
-    const candidates = panel.querySelectorAll('button, .menu_button, [role="button"]');
-    return [...candidates].find(el => {
+    return [...panel.querySelectorAll('button, .menu_button, [role="button"]')].find(el => {
         if (el.id === MANAGEMENT_BUTTON_ID) return false;
         const text = el.textContent?.replace(/\s+/g, ' ').trim();
         return text === '그룹 관리' || text === 'Manage groups';
@@ -324,17 +279,9 @@ function closeManager() {
     document.body.classList.remove('po-modal-open');
 }
 
-function presetOptions() {
-    const selected = selectedPresetName();
-    return presetNames()
-        .map(name => `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`)
-        .join('');
-}
-
 function openManager() {
     closeManager();
     setViewportMetrics();
-    selectedPresetName();
 
     const overlay = document.createElement('div');
     overlay.id = MODAL_ID;
@@ -342,17 +289,15 @@ function openManager() {
     overlay.innerHTML = `
         <section class="po-modal" role="dialog" aria-modal="true" aria-label="프롬프트 정리">
             <header class="po-modal-header">
-                <div class="po-title-row">
-                    <div class="po-modal-title">프롬프트 정리</div>
-                    <span class="po-save-state">자동 저장</span>
+                <div>
+                    <div class="po-title-row">
+                        <div class="po-modal-title">프롬프트 정리</div>
+                        <span class="po-save-state">자동 저장</span>
+                    </div>
+                    <div class="po-preset-line">현재 프리셋 · <strong>${escapeHtml(currentPresetName())}</strong></div>
                 </div>
                 <button type="button" class="po-icon-button po-close" aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
             </header>
-            <div class="po-preset-picker">
-                <span>수정할 프리셋</span>
-                <select class="text_pole po-preset-select">${presetOptions()}</select>
-                <small class="po-active-preset-note">현재 사용 중 · ${escapeHtml(activePresetName() || '없음')}</small>
-            </div>
             <nav class="po-tabs" aria-label="프롬프트 정리 탭">
                 <button type="button" class="po-tab" data-tab="create"><i class="fa-solid fa-plus"></i> 새 구분선</button>
                 <button type="button" class="po-tab" data-tab="saved"><i class="fa-solid fa-folder-open"></i> 저장된 구분선 <span class="po-tab-count">0</span></button>
@@ -364,10 +309,6 @@ function openManager() {
     document.body.classList.add('po-modal-open');
 
     overlay.querySelector('.po-close').addEventListener('click', closeManager);
-    overlay.querySelector('.po-preset-select')?.addEventListener('change', event => {
-        editorPresetName = event.target.value;
-        renderActiveTab();
-    });
     overlay.querySelectorAll('.po-tab').forEach(button => button.addEventListener('click', () => {
         activeTab = button.dataset.tab;
         renderActiveTab();
@@ -388,30 +329,25 @@ function renderActiveTab() {
     });
 
     const count = overlay.querySelector('.po-tab-count');
-    if (count) count.textContent = String(editorGroups().length);
-
-    if (!selectedPresetName()) {
-        content.innerHTML = '<div class="po-empty">OpenAI 프리셋 목록을 불러오지 못했어.</div>';
-        return;
-    }
+    if (count) count.textContent = String(currentGroups().length);
 
     activeTab === 'saved' ? renderSavedTab(content) : renderCreateTab(content);
 }
 
 function promptOptions(selectedId = '') {
-    return editorPrompts()
+    return availablePrompts()
         .map(prompt => `<option value="${escapeHtml(prompt.id)}" ${prompt.id === selectedId ? 'selected' : ''}>${escapeHtml(prompt.name)}</option>`)
         .join('');
 }
 
 function memberOptions(selected = []) {
-    return editorPrompts()
+    return availablePrompts()
         .map(prompt => `<label class="po-member"><input type="checkbox" value="${escapeHtml(prompt.id)}" ${selected.includes(prompt.id) ? 'checked' : ''}><span>${escapeHtml(prompt.name)}</span></label>`)
         .join('');
 }
 
 function renderCreateTab(content) {
-    const prompts = editorPrompts();
+    const prompts = availablePrompts();
     const firstPrompt = prompts[0];
 
     content.innerHTML = `
@@ -427,11 +363,11 @@ function renderCreateTab(content) {
                 </div>
                 <div class="po-card-members-pane">
                     <div class="po-label-row"><span>접을 프롬프트</span><small class="po-new-count">0개</small></div>
-                    <div class="po-members po-new-members">${memberOptions([]) || '<div class="po-empty-small">이 프리셋에 표시할 프롬프트가 없어.</div>'}</div>
+                    <div class="po-members po-new-members">${memberOptions([]) || '<div class="po-empty-small">현재 프리셋에서 프롬프트를 읽지 못했어.</div>'}</div>
                 </div>
             </div>
             <div class="po-create-actions">
-                <span class="po-hint">선택한 프리셋의 화면 구분 설정으로 저장돼.</span>
+                <span class="po-hint">현재 OpenAI 프리셋의 화면 구분 설정으로 저장돼.</span>
                 <button type="button" class="menu_button po-create-save" ${firstPrompt ? '' : 'disabled'}><i class="fa-solid fa-check"></i> 구분선 저장</button>
             </div>
         </section>`;
@@ -446,7 +382,7 @@ function renderCreateTab(content) {
         const anchor = content.querySelector('.po-new-anchor')?.value || '';
         if (!anchor) return;
 
-        editorGroups().push({
+        currentGroups().push({
             id: makeId(),
             name: content.querySelector('.po-new-name')?.value?.trim() || '새 구분선',
             anchor,
@@ -464,7 +400,7 @@ function renderCreateTab(content) {
 }
 
 function renderSavedTab(content) {
-    const saved = editorGroups();
+    const saved = currentGroups();
     if (!saved.length) {
         content.innerHTML = '<div class="po-empty">이 프리셋에 저장된 구분선이 없어.</div>';
         return;
@@ -480,7 +416,7 @@ function renderSavedTab(content) {
             <div class="po-saved-summary">
                 <button type="button" class="po-saved-main po-edit-toggle" aria-expanded="false">
                     <span class="po-saved-name">${escapeHtml(group.name || '구분선')}</span>
-                    <span class="po-saved-meta">${escapeHtml(editorPromptName(group.anchor))} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}</span>
+                    <span class="po-saved-meta">${escapeHtml(promptName(group.anchor))} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}</span>
                 </button>
                 <button type="button" class="po-small-button po-edit-toggle" aria-label="수정"><i class="fa-solid fa-pen"></i></button>
                 <button type="button" class="po-small-button po-delete-saved" aria-label="삭제"><i class="fa-solid fa-trash"></i></button>
@@ -497,7 +433,7 @@ function renderSavedTab(content) {
                     </div>
                     <div class="po-card-members-pane">
                         <div class="po-label-row"><span>접을 프롬프트</span><small class="po-member-count">${(group.members || []).length}개</small></div>
-                        <div class="po-members">${memberOptions(group.members || []) || '<div class="po-empty-small">이 프리셋에 표시할 프롬프트가 없어.</div>'}</div>
+                        <div class="po-members">${memberOptions(group.members || []) || '<div class="po-empty-small">현재 프리셋에서 프롬프트를 읽지 못했어.</div>'}</div>
                     </div>
                 </div>
             </div>`;
@@ -519,7 +455,7 @@ function bindSavedItem(item, group, index) {
 
     const updateSummary = () => {
         item.querySelector('.po-saved-name').textContent = group.name || '구분선';
-        item.querySelector('.po-saved-meta').textContent = `${editorPromptName(group.anchor)} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
+        item.querySelector('.po-saved-meta').textContent = `${promptName(group.anchor)} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
     };
 
     toggles.forEach(button => button.addEventListener('click', () => setOpen(panel.hidden)));
@@ -563,7 +499,7 @@ function bindSavedItem(item, group, index) {
 
     item.querySelector('.po-delete-saved')?.addEventListener('click', () => {
         if (!confirm(`“${group.name || '구분선'}”을 삭제할까?`)) return;
-        editorGroups().splice(index, 1);
+        currentGroups().splice(index, 1);
         save();
         schedulePromptRender();
         renderActiveTab();
@@ -571,10 +507,9 @@ function bindSavedItem(item, group, index) {
 }
 
 function handleActivePresetChange() {
+    closeManager();
     schedulePromptRender();
     ensureLaunchers();
-    const note = document.querySelector(`#${MODAL_ID} .po-active-preset-note`);
-    if (note) note.textContent = `현재 사용 중 · ${activePresetName() || '없음'}`;
 }
 
 function init() {
@@ -608,4 +543,3 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init, { once: true });
 } else {
     init();
-}

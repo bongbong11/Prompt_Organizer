@@ -8,6 +8,7 @@ const HIDDEN_CLASS = 'po-group-hidden';
 const defaults = { version: 1, groupsByPreset: {} };
 let observer = null;
 let renderTimer = null;
+let suppressObserver = false;
 
 function ctx() { return SillyTavern.getContext(); }
 function settings() {
@@ -46,9 +47,9 @@ function promptList() {
 }
 function getPromptDefinitions() {
     const c = ctx();
-    const source = c?.chatCompletionSettings?.prompts || c?.powerUserSettings?.prompts || [];
-    if (Array.isArray(source) && source.length) return source;
-    return promptList().map(p => ({ identifier: p.id, name: p.name }));
+    const candidates = [c?.chatCompletionSettings?.prompts, c?.powerUserSettings?.prompts, window?.oai_settings?.prompts];
+    const source = candidates.find(x => Array.isArray(x) && x.length) || [];
+    return source;
 }
 
 function cleanupPromptManager() {
@@ -61,6 +62,7 @@ function renderPromptManager() {
     renderTimer = setTimeout(() => {
         const list = document.querySelector('#completion_prompt_manager_list');
         if (!list) return;
+        suppressObserver = true;
         cleanupPromptManager();
         const map = new Map(promptList().map(x => [x.id, x.el]));
         for (const group of groups()) {
@@ -81,6 +83,7 @@ function renderPromptManager() {
                 renderPromptManager();
             });
         }
+        requestAnimationFrame(() => { suppressObserver = false; });
     }, 30);
 }
 function roleKo(role) { return ({system:'시스템', user:'사용자', assistant:'어시스턴트'})[role] || role || '시스템'; }
@@ -91,7 +94,7 @@ function settingsHost() {
 function renderSettings() {
     document.getElementById(ROOT_ID)?.remove();
     const host = settingsHost();
-    if (!host) return;
+    if (!host) return false;
     const root = document.createElement('div');
     root.id = ROOT_ID;
     root.className = 'inline-drawer po-settings';
@@ -99,6 +102,7 @@ function renderSettings() {
     host.append(root);
     root.querySelector('.po-add').addEventListener('click', addGroup);
     renderGroupCards();
+    return true;
 }
 function renderGroupCards() {
     const root = document.getElementById(ROOT_ID);
@@ -138,8 +142,6 @@ function addGroup() {
     save(); renderGroupCards(); renderPromptManager();
 }
 
-// Merge is deliberately performed on the final Chat Completion array. We only merge
-// messages whose current prepared text can be matched to selected enabled prompt content.
 function normalizeText(v) { return typeof v === 'string' ? v.trim() : ''; }
 function preparedPromptTexts() {
     const c = ctx();
@@ -156,6 +158,7 @@ function preparedPromptTexts() {
 function mergeGroupsIntoChat(eventData) {
     if (!eventData?.chat || !Array.isArray(eventData.chat)) return;
     const textMap = preparedPromptTexts();
+    if (!textMap.size) return;
     const claimed = new Set();
     for (const group of groups().filter(g => g.merge && g.members?.length)) {
         const matches = [];
@@ -176,7 +179,14 @@ function mergeGroupsIntoChat(eventData) {
 
 function watchPromptManager() {
     observer?.disconnect();
-    observer = new MutationObserver(() => renderPromptManager());
+    observer = new MutationObserver(mutations => {
+        if (suppressObserver) return;
+        const meaningful = mutations.some(m => [...m.addedNodes, ...m.removedNodes].some(n => !(n instanceof HTMLElement) || !n.classList?.contains(DIVIDER_CLASS)));
+        if (meaningful) {
+            renderPromptManager();
+            if (document.getElementById(ROOT_ID)) renderGroupCards();
+        }
+    });
     observer.observe(document.body, { childList: true, subtree: true });
 }
 function onPresetMaybeChanged() {
@@ -185,7 +195,7 @@ function onPresetMaybeChanged() {
 
 function init() {
     settings();
-    renderSettings();
+    if (!renderSettings()) setTimeout(renderSettings, 750);
     watchPromptManager();
     renderPromptManager();
     document.addEventListener('change', e => {

@@ -44,4 +44,3 @@ Prompt Organizer는 현재 Prompt Manager 상태를 읽어 화면 정리 기준�
 - 생성 직전 API 전송 배열에 개입하지 않음
 
 접기는 Prompt Manager DOM 표시만 바꾸며 실제 프롬프트 주입과 전송 구조에는 영향을 주지 않습니다.
-

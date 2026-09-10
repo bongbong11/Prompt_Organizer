@@ -14,6 +14,7 @@ let observedPromptList = null;
 let renderTimer = null;
 let rendering = false;
 let saveStateTimer = null;
+let activeTab = 'create';
 
 const context = () => SillyTavern.getContext();
 
@@ -87,10 +88,7 @@ function promptDefinitions() {
     if (!Array.isArray(prompts)) return [];
     return prompts
         .filter(prompt => prompt?.identifier)
-        .map(prompt => ({
-            id: String(prompt.identifier),
-            name: String(prompt.name || prompt.identifier),
-        }));
+        .map(prompt => ({ id: String(prompt.identifier), name: String(prompt.name || prompt.identifier) }));
 }
 
 function promptDomItems() {
@@ -107,6 +105,10 @@ function availablePrompts() {
     const definitions = promptDefinitions();
     if (definitions.length) return definitions;
     return promptDomItems().map(({ id, name }) => ({ id, name }));
+}
+
+function promptName(id) {
+    return availablePrompts().find(item => item.id === id)?.name || id || '없음';
 }
 
 function clearDecorations() {
@@ -236,117 +238,211 @@ function openManager() {
                 </div>
                 <button type="button" class="po-icon-button po-close" aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
             </header>
-            <div class="po-modal-body">
-                <div class="po-topbar"><button type="button" class="menu_button po-add"><i class="fa-solid fa-plus"></i> 구분선 추가</button></div>
-                <div class="po-groups"></div>
-                <div class="po-help">구분선을 만들거나 값을 바꾸는 즉시 현재 프리셋 설정에 자동 저장돼. 프롬프트 내용, 역할, 깊이, 순서, 활성 상태와 실제 전송 구조는 건드리지 않아.</div>
-            </div>
+            <nav class="po-tabs" aria-label="프롬프트 정리 탭">
+                <button type="button" class="po-tab" data-tab="create"><i class="fa-solid fa-plus"></i> 새 구분선</button>
+                <button type="button" class="po-tab" data-tab="saved"><i class="fa-solid fa-folder-open"></i> 저장된 구분선 <span class="po-tab-count">${groups().length}</span></button>
+            </nav>
+            <div class="po-modal-body"><div class="po-tab-content"></div></div>
         </section>`;
 
     document.body.append(overlay);
     document.body.classList.add('po-modal-open');
     overlay.querySelector('.po-close').addEventListener('click', closeManager);
-    overlay.querySelector('.po-add').addEventListener('click', addGroup);
-    renderGroupCards();
-}
-
-function renderGroupCards() {
-    const box = document.querySelector(`#${MODAL_ID} .po-groups`);
-    if (!box) return;
-
-    const prompts = availablePrompts();
-    box.replaceChildren();
-
-    if (!groups().length) {
-        box.innerHTML = '<div class="po-empty">아직 만든 구분선이 없어.</div>';
-        return;
-    }
-
-    groups().forEach((group, index) => {
-        const card = document.createElement('section');
-        card.className = 'po-card';
-
-        const options = prompts.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === group.anchor ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('');
-        const members = prompts.map(item => `<label class="po-member"><input type="checkbox" value="${escapeHtml(item.id)}" ${(group.members || []).includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name)}</span></label>`).join('');
-
-        card.innerHTML = `
-            <div class="po-card-head">
-                <input class="text_pole po-name" value="${escapeHtml(group.name)}" aria-label="구분선 이름">
-                <button type="button" class="po-icon-button po-delete" aria-label="삭제"><i class="fa-solid fa-trash"></i></button>
-            </div>
-            <div class="po-card-layout">
-                <div class="po-card-settings">
-                    <div class="po-grid">
-                        <label><span>기준 프롬프트</span><select class="text_pole po-anchor">${options}</select></label>
-                        <label><span>구분선 위치</span><select class="text_pole po-position"><option value="before" ${group.position !== 'after' ? 'selected' : ''}>앞에</option><option value="after" ${group.position === 'after' ? 'selected' : ''}>뒤에</option></select></label>
-                    </div>
-                    <label class="checkbox_label po-toggle"><input class="po-collapsible" type="checkbox" ${group.collapsible ? 'checked' : ''}><span>접기 가능</span></label>
-                </div>
-                <div class="po-card-members-pane">
-                    <div class="po-label-row"><span>접을 프롬프트</span><small class="po-member-count">${(group.members || []).length}개</small></div>
-                    <div class="po-members">${members || '<div class="po-empty-small">현재 프리셋의 프롬프트를 찾지 못했어.</div>'}</div>
-                </div>
-            </div>`;
-
-        box.append(card);
-        bindGroupCard(card, group, index);
-    });
-}
-
-function bindGroupCard(card, group, index) {
-    const persistAndRender = () => {
-        save();
-        schedulePromptRender();
-    };
-
-    card.querySelector('.po-name').addEventListener('input', event => {
-        group.name = event.target.value;
-        persistAndRender();
-    });
-    card.querySelector('.po-anchor').addEventListener('change', event => {
-        group.anchor = event.target.value;
-        persistAndRender();
-    });
-    card.querySelector('.po-position').addEventListener('change', event => {
-        group.position = event.target.value;
-        persistAndRender();
-    });
-    card.querySelector('.po-collapsible').addEventListener('change', event => {
-        group.collapsible = event.target.checked;
-        if (!group.collapsible) group.collapsed = false;
-        persistAndRender();
-    });
-
-    card.querySelectorAll('.po-member input').forEach(input => input.addEventListener('change', () => {
-        group.members = [...card.querySelectorAll('.po-member input:checked')].map(el => el.value);
-        const count = card.querySelector('.po-member-count');
-        if (count) count.textContent = `${group.members.length}개`;
-        save();
-        schedulePromptRender();
+    overlay.querySelectorAll('.po-tab').forEach(button => button.addEventListener('click', () => {
+        activeTab = button.dataset.tab;
+        renderActiveTab();
     }));
-
-    card.querySelector('.po-delete').addEventListener('click', () => {
-        groups().splice(index, 1);
-        save();
-        renderGroupCards();
-        schedulePromptRender();
-    });
+    renderActiveTab();
 }
 
-function addGroup() {
+function renderActiveTab() {
+    const overlay = document.getElementById(MODAL_ID);
+    const content = overlay?.querySelector('.po-tab-content');
+    if (!content) return;
+
+    overlay.querySelectorAll('.po-tab').forEach(button => {
+        const active = button.dataset.tab === activeTab;
+        button.classList.toggle('po-active', active);
+        button.setAttribute('aria-selected', String(active));
+    });
+
+    const count = overlay.querySelector('.po-tab-count');
+    if (count) count.textContent = String(groups().length);
+
+    activeTab === 'saved' ? renderSavedTab(content) : renderCreateTab(content);
+}
+
+function promptOptions(selectedId = '') {
+    const prompts = availablePrompts();
+    return prompts.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('');
+}
+
+function memberOptions(selected = []) {
+    const prompts = availablePrompts();
+    return prompts.map(item => `<label class="po-member"><input type="checkbox" value="${escapeHtml(item.id)}" ${selected.includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name)}</span></label>`).join('');
+}
+
+function renderCreateTab(content) {
     const firstPrompt = availablePrompts()[0];
-    groups().push({
-        id: makeId(),
+    const draft = {
         name: '새 구분선',
         anchor: firstPrompt?.id || '',
         position: 'before',
         collapsible: true,
-        collapsed: false,
         members: [],
+    };
+
+    content.innerHTML = `
+        <section class="po-create-card">
+            <div class="po-create-grid">
+                <div class="po-create-settings">
+                    <label class="po-field"><span>구분선 이름</span><input class="text_pole po-new-name" value="${escapeHtml(draft.name)}"></label>
+                    <div class="po-grid">
+                        <label><span>기준 프롬프트</span><select class="text_pole po-new-anchor">${promptOptions(draft.anchor)}</select></label>
+                        <label><span>위치</span><select class="text_pole po-new-position"><option value="before">앞에</option><option value="after">뒤에</option></select></label>
+                    </div>
+                    <label class="checkbox_label po-toggle"><input class="po-new-collapsible" type="checkbox" checked><span>접기 가능</span></label>
+                </div>
+                <div class="po-card-members-pane">
+                    <div class="po-label-row"><span>접을 프롬프트</span><small class="po-new-count">0개</small></div>
+                    <div class="po-members po-new-members">${memberOptions([]) || '<div class="po-empty-small">현재 프리셋의 프롬프트를 찾지 못했어.</div>'}</div>
+                </div>
+            </div>
+            <div class="po-create-actions">
+                <span class="po-hint">저장하면 현재 프리셋에 추가돼.</span>
+                <button type="button" class="menu_button po-create-save"><i class="fa-solid fa-check"></i> 구분선 저장</button>
+            </div>
+        </section>`;
+
+    const memberBox = content.querySelector('.po-new-members');
+    memberBox?.querySelectorAll('input').forEach(input => input.addEventListener('change', () => {
+        const selected = memberBox.querySelectorAll('input:checked').length;
+        const count = content.querySelector('.po-new-count');
+        if (count) count.textContent = `${selected}개`;
+    }));
+
+    content.querySelector('.po-create-save')?.addEventListener('click', () => {
+        const anchor = content.querySelector('.po-new-anchor')?.value || '';
+        const name = content.querySelector('.po-new-name')?.value?.trim() || '새 구분선';
+        const members = [...content.querySelectorAll('.po-new-members input:checked')].map(el => el.value);
+
+        groups().push({
+            id: makeId(),
+            name,
+            anchor,
+            position: content.querySelector('.po-new-position')?.value === 'after' ? 'after' : 'before',
+            collapsible: Boolean(content.querySelector('.po-new-collapsible')?.checked),
+            collapsed: false,
+            members,
+        });
+        save();
+        schedulePromptRender();
+        activeTab = 'saved';
+        renderActiveTab();
     });
-    save();
-    renderGroupCards();
-    schedulePromptRender();
+}
+
+function renderSavedTab(content) {
+    if (!groups().length) {
+        content.innerHTML = '<div class="po-empty">이 프리셋에 저장된 구분선이 없어.</div>';
+        return;
+    }
+
+    content.innerHTML = '<div class="po-saved-list"></div>';
+    const list = content.querySelector('.po-saved-list');
+
+    groups().forEach((group, index) => {
+        const item = document.createElement('section');
+        item.className = 'po-saved-item';
+        item.innerHTML = `
+            <div class="po-saved-summary">
+                <button type="button" class="po-saved-main po-edit-toggle" aria-expanded="false">
+                    <span class="po-saved-name">${escapeHtml(group.name || '구분선')}</span>
+                    <span class="po-saved-meta">${escapeHtml(promptName(group.anchor))} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}</span>
+                </button>
+                <button type="button" class="po-small-button po-edit-toggle" aria-label="수정"><i class="fa-solid fa-pen"></i></button>
+                <button type="button" class="po-small-button po-delete-saved" aria-label="삭제"><i class="fa-solid fa-trash"></i></button>
+            </div>
+            <div class="po-edit-panel" hidden>
+                <div class="po-card-layout">
+                    <div class="po-card-settings">
+                        <label class="po-field"><span>구분선 이름</span><input class="text_pole po-name" value="${escapeHtml(group.name || '')}"></label>
+                        <div class="po-grid">
+                            <label><span>기준 프롬프트</span><select class="text_pole po-anchor">${promptOptions(group.anchor)}</select></label>
+                            <label><span>위치</span><select class="text_pole po-position"><option value="before" ${group.position !== 'after' ? 'selected' : ''}>앞에</option><option value="after" ${group.position === 'after' ? 'selected' : ''}>뒤에</option></select></label>
+                        </div>
+                        <label class="checkbox_label po-toggle"><input class="po-collapsible" type="checkbox" ${group.collapsible ? 'checked' : ''}><span>접기 가능</span></label>
+                    </div>
+                    <div class="po-card-members-pane">
+                        <div class="po-label-row"><span>접을 프롬프트</span><small class="po-member-count">${(group.members || []).length}개</small></div>
+                        <div class="po-members">${memberOptions(group.members || []) || '<div class="po-empty-small">현재 프리셋의 프롬프트를 찾지 못했어.</div>'}</div>
+                    </div>
+                </div>
+            </div>`;
+
+        list.append(item);
+        bindSavedItem(item, group, index);
+    });
+}
+
+function bindSavedItem(item, group, index) {
+    const panel = item.querySelector('.po-edit-panel');
+    const toggles = item.querySelectorAll('.po-edit-toggle');
+    const setOpen = open => {
+        panel.hidden = !open;
+        toggles.forEach(button => button.setAttribute('aria-expanded', String(open)));
+        item.classList.toggle('po-editing', open);
+    };
+
+    toggles.forEach(button => button.addEventListener('click', () => setOpen(panel.hidden)));
+
+    const updateSummary = () => {
+        const name = item.querySelector('.po-saved-name');
+        const meta = item.querySelector('.po-saved-meta');
+        if (name) name.textContent = group.name || '구분선';
+        if (meta) meta.textContent = `${promptName(group.anchor)} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
+    };
+
+    item.querySelector('.po-name')?.addEventListener('input', event => {
+        group.name = event.target.value;
+        save();
+        updateSummary();
+        schedulePromptRender();
+    });
+    item.querySelector('.po-anchor')?.addEventListener('change', event => {
+        group.anchor = event.target.value;
+        save();
+        updateSummary();
+        schedulePromptRender();
+    });
+    item.querySelector('.po-position')?.addEventListener('change', event => {
+        group.position = event.target.value;
+        save();
+        updateSummary();
+        schedulePromptRender();
+    });
+    item.querySelector('.po-collapsible')?.addEventListener('change', event => {
+        group.collapsible = event.target.checked;
+        if (!group.collapsible) group.collapsed = false;
+        save();
+        updateSummary();
+        schedulePromptRender();
+    });
+    item.querySelectorAll('.po-member input').forEach(input => input.addEventListener('change', () => {
+        group.members = [...item.querySelectorAll('.po-member input:checked')].map(el => el.value);
+        const count = item.querySelector('.po-member-count');
+        if (count) count.textContent = `${group.members.length}개`;
+        save();
+        updateSummary();
+        schedulePromptRender();
+    }));
+    item.querySelector('.po-delete-saved')?.addEventListener('click', () => {
+        if (!confirm(`“${group.name || '구분선'}”을 삭제할까?`)) return;
+        groups().splice(index, 1);
+        save();
+        schedulePromptRender();
+        renderActiveTab();
+    });
 }
 
 function handlePresetChange() {

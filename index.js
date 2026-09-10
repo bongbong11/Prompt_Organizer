@@ -1,22 +1,27 @@
+import { getPresetManager } from '../../../preset-manager.js';
+
 export default 'Prompt Organizer';
 
 const KEY = 'promptOrganizer';
 const MODAL_ID = 'prompt-organizer-modal';
-const TOOLBAR_ID = 'prompt-organizer-toolbar-button';
+const MANAGEMENT_BUTTON_ID = 'prompt-organizer-management-button';
 const WAND_ID = 'prompt-organizer-wand-item';
 const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
-const PRESET_SELECTORS = ['#settings_perset_openai', '#openai_preset', '#completion_preset'];
+const SETTINGS_VERSION = 4;
 
-const defaults = { version: 3, groupsByPreset: {} };
+const defaults = { version: SETTINGS_VERSION, groupsByPreset: {} };
+
+let editorPresetName = '';
+let activeTab = 'create';
 let promptObserver = null;
 let observedPromptList = null;
 let renderTimer = null;
-let rendering = false;
 let saveStateTimer = null;
-let activeTab = 'create';
+let rendering = false;
 
 const context = () => SillyTavern.getContext();
+const presetManager = () => getPresetManager('openai');
 
 function store() {
     const c = context();
@@ -27,38 +32,35 @@ function store() {
 
 function migrateSettings() {
     const data = store();
-    let changed = data.version !== 3;
-    data.version = 3;
+    let changed = data.version !== SETTINGS_VERSION;
+    data.version = SETTINGS_VERSION;
 
     for (const list of Object.values(data.groupsByPreset)) {
         if (!Array.isArray(list)) continue;
         for (const group of list) {
-            if ('merge' in group) { delete group.merge; changed = true; }
-            if ('role' in group) { delete group.role; changed = true; }
+            if ('merge' in group) {
+                delete group.merge;
+                changed = true;
+            }
+            if ('role' in group) {
+                delete group.role;
+                changed = true;
+            }
         }
     }
 
-    if (changed) save();
+    if (changed) save(false);
 }
 
-function presetName() {
-    for (const selector of PRESET_SELECTORS) {
-        const select = document.querySelector(selector);
-        if (select?.value) return String(select.value);
-    }
-    return '__default__';
-}
-
-function groups() {
-    const all = store().groupsByPreset;
-    const preset = presetName();
-    all[preset] ??= [];
-    return all[preset];
+function save(showState = true) {
+    context().saveSettingsDebounced();
+    if (showState) showSavedState();
 }
 
 function showSavedState() {
     const el = document.querySelector(`#${MODAL_ID} .po-save-state`);
     if (!el) return;
+
     el.textContent = '저장됨';
     el.classList.add('po-saved');
     clearTimeout(saveStateTimer);
@@ -68,14 +70,13 @@ function showSavedState() {
     }, 900);
 }
 
-function save() {
-    context().saveSettingsDebounced();
-    showSavedState();
-}
-
 function escapeHtml(value = '') {
     return String(value).replace(/[&<>'"]/g, char => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;',
     })[char]);
 }
 
@@ -83,62 +84,96 @@ function makeId() {
     return `po_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function promptDefinitions() {
-    const settings = context().chatCompletionSettings;
-    const prompts = settings?.prompts;
-    if (!Array.isArray(prompts)) return [];
+function presetNames() {
+    const names = presetManager()?.getAllPresets?.();
+    return Array.isArray(names) ? names.filter(Boolean).map(String) : [];
+}
 
+function activePresetName() {
+    return String(presetManager()?.getSelectedPresetName?.() || '');
+}
+
+function selectedPresetName() {
+    const names = presetNames();
+    if (!names.length) {
+        editorPresetName = '';
+        return '';
+    }
+
+    if (!names.includes(editorPresetName)) {
+        const active = activePresetName();
+        editorPresetName = names.includes(active) ? active : names[0];
+    }
+
+    return editorPresetName;
+}
+
+function groupsFor(preset) {
+    if (!preset) return [];
+    const all = store().groupsByPreset;
+    all[preset] ??= [];
+    return all[preset];
+}
+
+function editorGroups() {
+    return groupsFor(selectedPresetName());
+}
+
+function presetData(name) {
+    if (!name) return null;
+    try {
+        return presetManager()?.getPresetSettings?.(name) ?? null;
+    } catch (error) {
+        console.warn('[Prompt Organizer] Failed to read preset:', name, error);
+        return null;
+    }
+}
+
+function promptsForPreset(name) {
+    const data = presetData(name);
+    const definitions = Array.isArray(data?.prompts) ? data.prompts : [];
     const byId = new Map();
-    for (const prompt of prompts) {
+
+    for (const prompt of definitions) {
         if (!prompt?.identifier) continue;
         const id = String(prompt.identifier);
-        byId.set(id, { id, name: String(prompt.name || prompt.identifier) });
+        byId.set(id, {
+            id,
+            name: String(prompt.name || prompt.identifier),
+        });
     }
 
-    const orderLists = Array.isArray(settings?.prompt_order) ? settings.prompt_order : [];
-    const globalOrder = orderLists.find(list => String(list?.character_id) === '100000')?.order;
-    const characterOrder = orderLists.find(list => String(list?.character_id) === String(context().characterId))?.order;
-    const order = Array.isArray(globalOrder) && globalOrder.length
-        ? globalOrder
-        : (Array.isArray(characterOrder) ? characterOrder : []);
+    const orderLists = Array.isArray(data?.prompt_order) ? data.prompt_order : [];
+    const order = orderLists.find(entry => String(entry?.character_id) === '100000')?.order;
 
-    if (!order.length) return [...byId.values()];
-
-    const result = [];
-    const seen = new Set();
-    for (const entry of order) {
-        const id = String(entry?.identifier ?? '');
-        const prompt = byId.get(id);
-        if (!prompt || seen.has(id)) continue;
-        result.push(prompt);
-        seen.add(id);
+    if (!Array.isArray(order) || !order.length) {
+        return [...byId.values()];
     }
 
-    for (const [id, prompt] of byId) {
-        if (!seen.has(id)) result.push(prompt);
-    }
-
-    return result;
+    /* Exact Prompt Manager order only. Definitions absent from prompt_order are not appended. */
+    return order
+        .map(entry => byId.get(String(entry?.identifier ?? '')))
+        .filter(Boolean);
 }
 
 function promptDomItems() {
     const list = document.querySelector('#completion_prompt_manager_list');
     if (!list) return [];
+
     return [...list.querySelectorAll('.completion_prompt_manager_prompt[data-pm-identifier]')].map(el => ({
-        id: el.dataset.pmIdentifier,
-        name: el.querySelector('.completion_prompt_manager_prompt_name, .prompt_manager_prompt_name')?.textContent?.trim() || el.dataset.pmIdentifier,
+        id: String(el.dataset.pmIdentifier),
+        name: el.querySelector('.completion_prompt_manager_prompt_name, .prompt_manager_prompt_name')?.textContent?.trim()
+            || String(el.dataset.pmIdentifier),
         el,
     }));
 }
 
-function availablePrompts() {
-    const definitions = promptDefinitions();
-    if (definitions.length) return definitions;
-    return promptDomItems().map(({ id, name }) => ({ id, name }));
+function editorPrompts() {
+    return promptsForPreset(selectedPresetName());
 }
 
-function promptName(id) {
-    return availablePrompts().find(item => item.id === id)?.name || id || '없음';
+function editorPromptName(id) {
+    return editorPrompts().find(prompt => prompt.id === id)?.name || id || '없음';
 }
 
 function clearDecorations() {
@@ -160,7 +195,9 @@ function renderPromptManager() {
     clearDecorations();
 
     const map = new Map(promptDomItems().map(item => [item.id, item.el]));
-    for (const group of groups()) {
+    const preset = activePresetName();
+
+    for (const group of groupsFor(preset)) {
         const anchor = map.get(group.anchor);
         if (!anchor) continue;
 
@@ -177,7 +214,9 @@ function renderPromptManager() {
         group.position === 'after' ? anchor.after(divider) : anchor.before(divider);
 
         if (group.collapsible && group.collapsed) {
-            for (const id of group.members || []) map.get(id)?.classList.add(HIDDEN_CLASS);
+            for (const id of group.members || []) {
+                map.get(id)?.classList.add(HIDDEN_CLASS);
+            }
         }
 
         divider.querySelector('.po-fold')?.addEventListener('click', event => {
@@ -207,29 +246,32 @@ function attachPromptObserver() {
     promptObserver.observe(list, { childList: true, subtree: true });
 }
 
-function ensureLaunchers() {
-    /* Remove the old chat-input document launcher from earlier versions. */
-    document.getElementById(TOOLBAR_ID)?.remove();
+function findGroupManagementButton() {
+    const candidates = document.querySelectorAll('button, .menu_button, [role="button"]');
+    return [...candidates].find(el => el.id !== MANAGEMENT_BUTTON_ID && el.textContent?.trim() === '그룹 관리') || null;
+}
 
-    /* Put the organizer beside SillyTavern's character/group management control. */
-    const anchor = document.getElementById('rm_button_characters') || document.getElementById('rm_button_selected_ch');
-    if (anchor && !document.getElementById('prompt-organizer-management-button')) {
-        const button = document.createElement('div');
-        button.id = 'prompt-organizer-management-button';
-        button.className = `${anchor.className || ''} po-management-launcher interactable`;
-        button.title = '프롬프트 정리';
-        button.setAttribute('aria-label', '프롬프트 정리');
-        button.setAttribute('role', 'button');
-        button.tabIndex = 0;
-        button.innerHTML = '<i class="fa-solid fa-layer-group"></i>';
-        button.addEventListener('click', openManager);
-        button.addEventListener('keydown', event => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                openManager();
-            }
-        });
-        anchor.after(button);
+function createManagementLauncher(anchor) {
+    const button = document.createElement('button');
+    button.id = MANAGEMENT_BUTTON_ID;
+    button.type = 'button';
+    button.className = 'menu_button po-management-launcher';
+    button.title = '프롬프트 정리';
+    button.setAttribute('aria-label', '프롬프트 정리');
+    button.innerHTML = '<i class="fa-solid fa-layer-group"></i><span>프롬프트 정리</span>';
+    button.addEventListener('click', openManager);
+    anchor.after(button);
+}
+
+function ensureLaunchers() {
+    /* Clean up the obsolete chat-input launcher from pre-0.3 versions. */
+    document.getElementById('prompt-organizer-toolbar-button')?.remove();
+
+    if (!document.getElementById(MANAGEMENT_BUTTON_ID)) {
+        const textAnchor = findGroupManagementButton();
+        const fallbackAnchor = document.getElementById('rm_button_characters') || document.getElementById('rm_button_selected_ch');
+        const anchor = textAnchor || fallbackAnchor;
+        if (anchor) createManagementLauncher(anchor);
     }
 
     const menu = document.getElementById('extensionsMenu');
@@ -241,7 +283,10 @@ function ensureLaunchers() {
         item.innerHTML = '<i class="fa-solid fa-layer-group fa-fw"></i><span>프롬프트 정리</span>';
         item.addEventListener('click', openManager);
         item.addEventListener('keydown', event => {
-            if (event.key === 'Enter' || event.key === ' ') openManager();
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openManager();
+            }
         });
         menu.append(item);
     }
@@ -249,15 +294,10 @@ function ensureLaunchers() {
 
 function setViewportMetrics() {
     const viewport = window.visualViewport;
-    const height = viewport?.height || window.innerHeight;
-    const width = viewport?.width || window.innerWidth;
-    const top = viewport?.offsetTop || 0;
-    const left = viewport?.offsetLeft || 0;
-
-    document.documentElement.style.setProperty('--po-viewport-height', `${height}px`);
-    document.documentElement.style.setProperty('--po-viewport-width', `${width}px`);
-    document.documentElement.style.setProperty('--po-viewport-top', `${top}px`);
-    document.documentElement.style.setProperty('--po-viewport-left', `${left}px`);
+    document.documentElement.style.setProperty('--po-viewport-height', `${viewport?.height || window.innerHeight}px`);
+    document.documentElement.style.setProperty('--po-viewport-width', `${viewport?.width || window.innerWidth}px`);
+    document.documentElement.style.setProperty('--po-viewport-top', `${viewport?.offsetTop || 0}px`);
+    document.documentElement.style.setProperty('--po-viewport-left', `${viewport?.offsetLeft || 0}px`);
 }
 
 function closeManager() {
@@ -265,9 +305,17 @@ function closeManager() {
     document.body.classList.remove('po-modal-open');
 }
 
+function presetOptions() {
+    const selected = selectedPresetName();
+    return presetNames()
+        .map(name => `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`)
+        .join('');
+}
+
 function openManager() {
     closeManager();
     setViewportMetrics();
+    selectedPresetName();
 
     const overlay = document.createElement('div');
     overlay.id = MODAL_ID;
@@ -275,26 +323,37 @@ function openManager() {
     overlay.innerHTML = `
         <section class="po-modal" role="dialog" aria-modal="true" aria-label="프롬프트 정리">
             <header class="po-modal-header">
-                <div>
-                    <div class="po-title-row"><div class="po-modal-title">프롬프트 정리</div><span class="po-save-state">자동 저장</span></div>
-                    <div class="po-preset-line">현재 프리셋 · <strong>${escapeHtml(presetName())}</strong></div>
+                <div class="po-title-row">
+                    <div class="po-modal-title">프롬프트 정리</div>
+                    <span class="po-save-state">자동 저장</span>
                 </div>
                 <button type="button" class="po-icon-button po-close" aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
             </header>
+            <div class="po-preset-picker">
+                <span>수정할 프리셋</span>
+                <select class="text_pole po-preset-select">${presetOptions()}</select>
+                <small class="po-active-preset-note">현재 사용 중 · ${escapeHtml(activePresetName() || '없음')}</small>
+            </div>
             <nav class="po-tabs" aria-label="프롬프트 정리 탭">
                 <button type="button" class="po-tab" data-tab="create"><i class="fa-solid fa-plus"></i> 새 구분선</button>
-                <button type="button" class="po-tab" data-tab="saved"><i class="fa-solid fa-folder-open"></i> 저장된 구분선 <span class="po-tab-count">${groups().length}</span></button>
+                <button type="button" class="po-tab" data-tab="saved"><i class="fa-solid fa-folder-open"></i> 저장된 구분선 <span class="po-tab-count">0</span></button>
             </nav>
             <div class="po-modal-body"><div class="po-tab-content"></div></div>
         </section>`;
 
     document.body.append(overlay);
     document.body.classList.add('po-modal-open');
+
     overlay.querySelector('.po-close').addEventListener('click', closeManager);
+    overlay.querySelector('.po-preset-select')?.addEventListener('change', event => {
+        editorPresetName = event.target.value;
+        renderActiveTab();
+    });
     overlay.querySelectorAll('.po-tab').forEach(button => button.addEventListener('click', () => {
         activeTab = button.dataset.tab;
         renderActiveTab();
     }));
+
     renderActiveTab();
 }
 
@@ -310,74 +369,74 @@ function renderActiveTab() {
     });
 
     const count = overlay.querySelector('.po-tab-count');
-    if (count) count.textContent = String(groups().length);
+    if (count) count.textContent = String(editorGroups().length);
+
+    if (!selectedPresetName()) {
+        content.innerHTML = '<div class="po-empty">OpenAI 프리셋 목록을 불러오지 못했어.</div>';
+        return;
+    }
 
     activeTab === 'saved' ? renderSavedTab(content) : renderCreateTab(content);
 }
 
 function promptOptions(selectedId = '') {
-    const prompts = availablePrompts();
-    return prompts.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('');
+    return editorPrompts()
+        .map(prompt => `<option value="${escapeHtml(prompt.id)}" ${prompt.id === selectedId ? 'selected' : ''}>${escapeHtml(prompt.name)}</option>`)
+        .join('');
 }
 
 function memberOptions(selected = []) {
-    const prompts = availablePrompts();
-    return prompts.map(item => `<label class="po-member"><input type="checkbox" value="${escapeHtml(item.id)}" ${selected.includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name)}</span></label>`).join('');
+    return editorPrompts()
+        .map(prompt => `<label class="po-member"><input type="checkbox" value="${escapeHtml(prompt.id)}" ${selected.includes(prompt.id) ? 'checked' : ''}><span>${escapeHtml(prompt.name)}</span></label>`)
+        .join('');
 }
 
 function renderCreateTab(content) {
-    const firstPrompt = availablePrompts()[0];
-    const draft = {
-        name: '새 구분선',
-        anchor: firstPrompt?.id || '',
-        position: 'before',
-        collapsible: true,
-        members: [],
-    };
+    const prompts = editorPrompts();
+    const firstPrompt = prompts[0];
 
     content.innerHTML = `
         <section class="po-create-card">
             <div class="po-create-grid">
                 <div class="po-create-settings">
-                    <label class="po-field"><span>구분선 이름</span><input class="text_pole po-new-name" value="${escapeHtml(draft.name)}"></label>
+                    <label class="po-field"><span>구분선 이름</span><input class="text_pole po-new-name" value="새 구분선"></label>
                     <div class="po-grid">
-                        <label><span>기준 프롬프트</span><select class="text_pole po-new-anchor">${promptOptions(draft.anchor)}</select></label>
+                        <label><span>기준 프롬프트</span><select class="text_pole po-new-anchor">${promptOptions(firstPrompt?.id || '')}</select></label>
                         <label><span>위치</span><select class="text_pole po-new-position"><option value="before">앞에</option><option value="after">뒤에</option></select></label>
                     </div>
                     <label class="checkbox_label po-toggle"><input class="po-new-collapsible" type="checkbox" checked><span>접기 가능</span></label>
                 </div>
                 <div class="po-card-members-pane">
                     <div class="po-label-row"><span>접을 프롬프트</span><small class="po-new-count">0개</small></div>
-                    <div class="po-members po-new-members">${memberOptions([]) || '<div class="po-empty-small">현재 프리셋의 프롬프트를 찾지 못했어.</div>'}</div>
+                    <div class="po-members po-new-members">${memberOptions([]) || '<div class="po-empty-small">이 프리셋에 표시할 프롬프트가 없어.</div>'}</div>
                 </div>
             </div>
             <div class="po-create-actions">
-                <span class="po-hint">저장하면 현재 프리셋에 추가돼.</span>
-                <button type="button" class="menu_button po-create-save"><i class="fa-solid fa-check"></i> 구분선 저장</button>
+                <span class="po-hint">선택한 프리셋의 화면 구분 설정으로 저장돼.</span>
+                <button type="button" class="menu_button po-create-save" ${firstPrompt ? '' : 'disabled'}><i class="fa-solid fa-check"></i> 구분선 저장</button>
             </div>
         </section>`;
 
     const memberBox = content.querySelector('.po-new-members');
     memberBox?.querySelectorAll('input').forEach(input => input.addEventListener('change', () => {
-        const selected = memberBox.querySelectorAll('input:checked').length;
         const count = content.querySelector('.po-new-count');
-        if (count) count.textContent = `${selected}개`;
+        if (count) count.textContent = `${memberBox.querySelectorAll('input:checked').length}개`;
     }));
 
     content.querySelector('.po-create-save')?.addEventListener('click', () => {
         const anchor = content.querySelector('.po-new-anchor')?.value || '';
-        const name = content.querySelector('.po-new-name')?.value?.trim() || '새 구분선';
-        const members = [...content.querySelectorAll('.po-new-members input:checked')].map(el => el.value);
+        if (!anchor) return;
 
-        groups().push({
+        editorGroups().push({
             id: makeId(),
-            name,
+            name: content.querySelector('.po-new-name')?.value?.trim() || '새 구분선',
             anchor,
             position: content.querySelector('.po-new-position')?.value === 'after' ? 'after' : 'before',
             collapsible: Boolean(content.querySelector('.po-new-collapsible')?.checked),
             collapsed: false,
-            members,
+            members: [...content.querySelectorAll('.po-new-members input:checked')].map(el => el.value),
         });
+
         save();
         schedulePromptRender();
         activeTab = 'saved';
@@ -386,7 +445,8 @@ function renderCreateTab(content) {
 }
 
 function renderSavedTab(content) {
-    if (!groups().length) {
+    const saved = editorGroups();
+    if (!saved.length) {
         content.innerHTML = '<div class="po-empty">이 프리셋에 저장된 구분선이 없어.</div>';
         return;
     }
@@ -394,14 +454,14 @@ function renderSavedTab(content) {
     content.innerHTML = '<div class="po-saved-list"></div>';
     const list = content.querySelector('.po-saved-list');
 
-    groups().forEach((group, index) => {
+    saved.forEach((group, index) => {
         const item = document.createElement('section');
         item.className = 'po-saved-item';
         item.innerHTML = `
             <div class="po-saved-summary">
                 <button type="button" class="po-saved-main po-edit-toggle" aria-expanded="false">
                     <span class="po-saved-name">${escapeHtml(group.name || '구분선')}</span>
-                    <span class="po-saved-meta">${escapeHtml(promptName(group.anchor))} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}</span>
+                    <span class="po-saved-meta">${escapeHtml(editorPromptName(group.anchor))} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}</span>
                 </button>
                 <button type="button" class="po-small-button po-edit-toggle" aria-label="수정"><i class="fa-solid fa-pen"></i></button>
                 <button type="button" class="po-small-button po-delete-saved" aria-label="삭제"><i class="fa-solid fa-trash"></i></button>
@@ -418,7 +478,7 @@ function renderSavedTab(content) {
                     </div>
                     <div class="po-card-members-pane">
                         <div class="po-label-row"><span>접을 프롬프트</span><small class="po-member-count">${(group.members || []).length}개</small></div>
-                        <div class="po-members">${memberOptions(group.members || []) || '<div class="po-empty-small">현재 프리셋의 프롬프트를 찾지 못했어.</div>'}</div>
+                        <div class="po-members">${memberOptions(group.members || []) || '<div class="po-empty-small">이 프리셋에 표시할 프롬프트가 없어.</div>'}</div>
                     </div>
                 </div>
             </div>`;
@@ -431,20 +491,19 @@ function renderSavedTab(content) {
 function bindSavedItem(item, group, index) {
     const panel = item.querySelector('.po-edit-panel');
     const toggles = item.querySelectorAll('.po-edit-toggle');
+
     const setOpen = open => {
         panel.hidden = !open;
-        toggles.forEach(button => button.setAttribute('aria-expanded', String(open)));
         item.classList.toggle('po-editing', open);
+        toggles.forEach(button => button.setAttribute('aria-expanded', String(open)));
+    };
+
+    const updateSummary = () => {
+        item.querySelector('.po-saved-name').textContent = group.name || '구분선';
+        item.querySelector('.po-saved-meta').textContent = `${editorPromptName(group.anchor)} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
     };
 
     toggles.forEach(button => button.addEventListener('click', () => setOpen(panel.hidden)));
-
-    const updateSummary = () => {
-        const name = item.querySelector('.po-saved-name');
-        const meta = item.querySelector('.po-saved-meta');
-        if (name) name.textContent = group.name || '구분선';
-        if (meta) meta.textContent = `${promptName(group.anchor)} · ${group.position === 'after' ? '뒤' : '앞'} · ${(group.members || []).length}개${group.collapsible ? ' · 접기' : ''}`;
-    };
 
     item.querySelector('.po-name')?.addEventListener('input', event => {
         group.name = event.target.value;
@@ -452,18 +511,21 @@ function bindSavedItem(item, group, index) {
         updateSummary();
         schedulePromptRender();
     });
+
     item.querySelector('.po-anchor')?.addEventListener('change', event => {
         group.anchor = event.target.value;
         save();
         updateSummary();
         schedulePromptRender();
     });
+
     item.querySelector('.po-position')?.addEventListener('change', event => {
         group.position = event.target.value;
         save();
         updateSummary();
         schedulePromptRender();
     });
+
     item.querySelector('.po-collapsible')?.addEventListener('change', event => {
         group.collapsible = event.target.checked;
         if (!group.collapsible) group.collapsed = false;
@@ -471,26 +533,28 @@ function bindSavedItem(item, group, index) {
         updateSummary();
         schedulePromptRender();
     });
+
     item.querySelectorAll('.po-member input').forEach(input => input.addEventListener('change', () => {
         group.members = [...item.querySelectorAll('.po-member input:checked')].map(el => el.value);
-        const count = item.querySelector('.po-member-count');
-        if (count) count.textContent = `${group.members.length}개`;
+        item.querySelector('.po-member-count').textContent = `${group.members.length}개`;
         save();
         updateSummary();
         schedulePromptRender();
     }));
+
     item.querySelector('.po-delete-saved')?.addEventListener('click', () => {
         if (!confirm(`“${group.name || '구분선'}”을 삭제할까?`)) return;
-        groups().splice(index, 1);
+        editorGroups().splice(index, 1);
         save();
         schedulePromptRender();
         renderActiveTab();
     });
 }
 
-function handlePresetChange() {
-    closeManager();
+function handleActivePresetChange() {
     schedulePromptRender();
+    const note = document.querySelector(`#${MODAL_ID} .po-active-preset-note`);
+    if (note) note.textContent = `현재 사용 중 · ${activePresetName() || '없음'}`;
 }
 
 function init() {
@@ -498,20 +562,16 @@ function init() {
     migrateSettings();
     ensureLaunchers();
     setTimeout(ensureLaunchers, 750);
+    setTimeout(ensureLaunchers, 2000);
     attachPromptObserver();
     schedulePromptRender();
 
     const c = context();
-    c.eventSource?.on?.(c.eventTypes?.OAI_PRESET_CHANGED_AFTER || 'oai_preset_changed_after', handlePresetChange);
-
-    document.addEventListener('change', event => {
-        if (PRESET_SELECTORS.some(selector => event.target?.matches?.(selector))) handlePresetChange();
-    });
+    c.eventSource?.on?.(c.eventTypes?.OAI_PRESET_CHANGED_AFTER || 'oai_preset_changed_after', handleActivePresetChange);
 
     document.addEventListener('pointerdown', event => {
         const overlay = document.getElementById(MODAL_ID);
-        if (!overlay) return;
-        if (event.target.closest?.('.po-modal')) return;
+        if (!overlay || event.target.closest?.('.po-modal')) return;
         closeManager();
     }, true);
 
@@ -524,5 +584,8 @@ function init() {
     window.addEventListener('resize', setViewportMetrics);
 }
 
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
-else init();
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+    init();
+}

@@ -171,9 +171,17 @@ function ensureLaunchers() {
     }
 }
 
-function setViewportHeight() {
-    const height = window.visualViewport?.height || window.innerHeight;
+function setViewportMetrics() {
+    const viewport = window.visualViewport;
+    const height = viewport?.height || window.innerHeight;
+    const width = viewport?.width || window.innerWidth;
+    const top = viewport?.offsetTop || 0;
+    const left = viewport?.offsetLeft || 0;
+
     document.documentElement.style.setProperty('--po-viewport-height', `${height}px`);
+    document.documentElement.style.setProperty('--po-viewport-width', `${width}px`);
+    document.documentElement.style.setProperty('--po-viewport-top', `${top}px`);
+    document.documentElement.style.setProperty('--po-viewport-left', `${left}px`);
 }
 
 function closeManager() {
@@ -183,7 +191,7 @@ function closeManager() {
 
 function openManager() {
     closeManager();
-    setViewportHeight();
+    setViewportMetrics();
 
     const overlay = document.createElement('div');
     overlay.id = MODAL_ID;
@@ -208,7 +216,6 @@ function openManager() {
     document.body.classList.add('po-modal-open');
     overlay.querySelector('.po-close').addEventListener('click', closeManager);
     overlay.querySelector('.po-add').addEventListener('click', addGroup);
-    overlay.addEventListener('click', event => { if (event.target === overlay) closeManager(); });
     renderGroupCards();
 }
 
@@ -321,11 +328,22 @@ function init() {
     document.addEventListener('change', event => {
         if (PRESET_SELECTORS.some(selector => event.target?.matches?.(selector))) handlePresetChange();
     });
+
+    /* Any tap outside the organizer panel closes it, including taps on the visible chat area. */
+    document.addEventListener('pointerdown', event => {
+        const overlay = document.getElementById(MODAL_ID);
+        if (!overlay) return;
+        if (event.target.closest?.('.po-modal')) return;
+        closeManager();
+    }, true);
+
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape' && document.getElementById(MODAL_ID)) closeManager();
     });
-    window.visualViewport?.addEventListener('resize', setViewportHeight);
-    window.addEventListener('resize', setViewportHeight);
+
+    window.visualViewport?.addEventListener('resize', setViewportMetrics);
+    window.visualViewport?.addEventListener('scroll', setViewportMetrics);
+    window.addEventListener('resize', setViewportMetrics);
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });

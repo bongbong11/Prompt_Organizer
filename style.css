@@ -8,8 +8,12 @@
 
 .po-modal-overlay {
     position: fixed;
-    inset: 0;
+    top: var(--po-viewport-top, 0px);
+    left: var(--po-viewport-left, 0px);
+    width: var(--po-viewport-width, 100vw);
+    height: var(--po-viewport-height, 100dvh);
     z-index: 100000;
+    box-sizing: border-box;
     display: grid;
     place-items: center;
     padding: 16px;
@@ -19,8 +23,8 @@
 }
 
 .po-modal {
-    width: min(680px, calc(100vw - 32px));
-    max-height: min(820px, calc(var(--po-viewport-height, 100dvh) - 32px));
+    width: min(680px, calc(100% - 32px));
+    max-height: min(820px, calc(100% - 32px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -30,7 +34,6 @@
     box-shadow: 0 12px 40px rgb(0 0 0 / .28);
 }
 
-/* Korean labels must stay horizontal even when the mobile layout becomes narrow. */
 .po-modal button,
 .po-modal .menu_button,
 .po-modal select,
@@ -178,7 +181,6 @@
 
 @media (max-width: 700px) {
     .po-modal-overlay {
-        place-items: center;
         padding:
             max(18px, env(safe-area-inset-top))
             10px
@@ -187,10 +189,7 @@
 
     .po-modal {
         width: min(100%, 620px);
-        max-height: min(
-            82dvh,
-            calc(var(--po-viewport-height, 100dvh) - 48px)
-        );
+        max-height: min(72%, 620px);
         border-radius: 14px;
     }
 
@@ -215,10 +214,7 @@
 
     .po-modal {
         width: 100%;
-        max-height: min(
-            84dvh,
-            calc(var(--po-viewport-height, 100dvh) - 36px)
-        );
+        max-height: 72%;
         border-radius: 12px;
     }
 }

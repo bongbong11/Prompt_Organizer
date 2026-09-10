@@ -30,6 +30,22 @@
     box-shadow: 0 12px 40px rgb(0 0 0 / .28);
 }
 
+/* Korean labels must stay horizontal even when the mobile layout becomes narrow. */
+.po-modal button,
+.po-modal .menu_button,
+.po-modal select,
+.po-modal option {
+    writing-mode: horizontal-tb;
+    word-break: keep-all;
+}
+
+.po-modal button,
+.po-modal .menu_button {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    flex-shrink: 0;
+}
+
 .po-modal-header {
     flex: 0 0 auto;
     display: flex;
@@ -183,7 +199,10 @@
     .po-grid { grid-template-columns: 1fr; }
     .po-members { max-height: min(220px, 28dvh); }
     .po-card { padding: 10px; }
-    .po-topbar .menu_button { min-height: 36px; }
+    .po-topbar .menu_button {
+        min-height: 36px;
+        max-width: 100%;
+    }
 }
 
 @media (max-width: 420px) {

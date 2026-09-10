@@ -1,15 +1,18 @@
 import { oai_settings, promptManager } from '../../../openai.js';
 
-export default 'Prompt Organizer';
+export default '접어';
 
 const KEY = 'promptOrganizer';
 const MODAL_ID = 'prompt-organizer-modal';
+const SETTINGS_ID = 'prompt-organizer-settings';
+const TOOLBAR_ID = 'prompt-organizer-toolbar-button';
+const WAND_CONTAINER_ID = 'prompt-organizer-wand-container';
 const WAND_ID = 'prompt-organizer-wand-item';
 const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
-const SETTINGS_VERSION = 8;
+const SETTINGS_VERSION = 9;
 
-const defaults = { version: SETTINGS_VERSION, groupsByPreset: {} };
+const defaults = { version: SETTINGS_VERSION, enabled: true, groupsByPreset: {} };
 
 let activeTab = 'create';
 let promptObserver = null;
@@ -24,7 +27,12 @@ function store() {
     const c = context();
     c.extensionSettings[KEY] ??= structuredClone(defaults);
     c.extensionSettings[KEY].groupsByPreset ??= {};
+    c.extensionSettings[KEY].enabled ??= true;
     return c.extensionSettings[KEY];
+}
+
+function isEnabled() {
+    return store().enabled !== false;
 }
 
 function save(showState = true) {
@@ -219,12 +227,21 @@ function clearDecorations() {
 
 function schedulePromptRender() {
     clearTimeout(renderTimer);
+    if (!isEnabled()) {
+        clearDecorations();
+        return;
+    }
     renderTimer = setTimeout(renderPromptManager, 25);
 }
 
 function renderPromptManager() {
     const list = document.querySelector('#completion_prompt_manager_list');
     if (!list || rendering) return;
+
+    if (!isEnabled()) {
+        clearDecorations();
+        return;
+    }
 
     rendering = true;
     promptObserver?.disconnect();
@@ -276,6 +293,10 @@ function renderPromptManager() {
 }
 
 function attachPromptObserver() {
+    if (!isEnabled()) {
+        promptObserver?.disconnect();
+        return;
+    }
     const list = document.querySelector('#completion_prompt_manager_list');
     if (!list) return;
     if (observedPromptList !== list || !promptObserver) {
@@ -289,19 +310,107 @@ function attachPromptObserver() {
 }
 
 function ensureLaunchers() {
-    document.getElementById('prompt-organizer-toolbar-button')?.remove();
+    if (!isEnabled()) {
+        removeLaunchers();
+        return;
+    }
+
     document.getElementById('prompt-organizer-management-button')?.remove();
+
+    if (!document.getElementById(TOOLBAR_ID)) {
+        const button = document.createElement('div');
+        button.id = TOOLBAR_ID;
+        button.className = 'interactable po-toolbar-launcher';
+        button.title = '접어';
+        button.setAttribute('aria-label', '접어');
+        button.setAttribute('role', 'button');
+        button.tabIndex = 0;
+        button.innerHTML = '<span class="po-asset-icon" aria-hidden="true"></span>';
+        button.addEventListener('click', openManager);
+        button.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openManager();
+            }
+        });
+
+        const sendButton = document.getElementById('send_but');
+        const sendForm = document.getElementById('rightSendForm') || document.getElementById('send_form');
+        sendButton ? sendButton.before(button) : sendForm?.append(button);
+    }
 
     const menu = document.getElementById('extensionsMenu');
     if (menu && !document.getElementById(WAND_ID)) {
+        const container = document.createElement('div');
+        container.id = WAND_CONTAINER_ID;
+        container.className = 'extension_container';
         const item = document.createElement('div');
         item.id = WAND_ID;
         item.className = 'list-group-item flex-container flexGap5 interactable';
         item.tabIndex = 0;
-        item.innerHTML = '<i class="fa-solid fa-layer-group fa-fw"></i><span>프롬프트 정리</span>';
+        item.setAttribute('role', 'button');
+        item.innerHTML = '<span class="po-asset-icon po-menu-icon" aria-hidden="true"></span><span>접어</span>';
         item.addEventListener('click', openManager);
-        menu.append(item);
+        item.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openManager();
+            }
+        });
+        container.append(item);
+        menu.append(container);
     }
+}
+
+function removeLaunchers() {
+    document.getElementById(TOOLBAR_ID)?.remove();
+    document.getElementById(WAND_CONTAINER_ID)?.remove();
+    document.getElementById(WAND_ID)?.remove();
+    document.getElementById('prompt-organizer-management-button')?.remove();
+}
+
+function ensureSettingsToggle() {
+    if (document.getElementById(SETTINGS_ID)) return;
+    const host = document.getElementById('extensions_settings');
+    if (!host) return;
+
+    const settings = document.createElement('div');
+    settings.id = SETTINGS_ID;
+    settings.className = 'extension_container po-extension-settings';
+    settings.innerHTML = `
+        <div class="inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>접어</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+                <label class="checkbox_label po-enabled-setting">
+                    <input type="checkbox" ${isEnabled() ? 'checked' : ''}>
+                    <span>확장 사용</span>
+                </label>
+            </div>
+        </div>`;
+    host.append(settings);
+
+    settings.querySelector('input')?.addEventListener('change', event => {
+        store().enabled = event.target.checked;
+        save(false);
+        applyEnabledState();
+    });
+}
+
+function applyEnabledState() {
+    clearTimeout(renderTimer);
+    closeManager();
+    if (!isEnabled()) {
+        promptObserver?.disconnect();
+        removeLaunchers();
+        clearDecorations();
+        return;
+    }
+    ensureLaunchers();
+    attachPromptObserver();
+    schedulePromptRender();
 }
 
 function setViewportMetrics() {
@@ -318,6 +427,7 @@ function closeManager() {
 }
 
 function openManager() {
+    if (!isEnabled()) return;
     closeManager();
     setViewportMetrics();
 
@@ -325,10 +435,10 @@ function openManager() {
     overlay.id = MODAL_ID;
     overlay.className = 'po-modal-overlay';
     overlay.innerHTML = `
-        <section class="po-modal" role="dialog" aria-modal="true" aria-label="프롬프트 정리">
+        <section class="po-modal" role="dialog" aria-modal="true" aria-label="접어">
             <header class="po-modal-header">
                 <div>
-                    <div class="po-title-row"><div class="po-modal-title">프롬프트 정리</div><span class="po-save-state">자동 저장</span></div>
+                    <div class="po-title-row"><div class="po-modal-title">접어</div><span class="po-save-state">자동 저장</span></div>
                     <div class="po-preset-line">현재 프리셋 · <strong>${escapeHtml(currentPresetName())}</strong></div>
                 </div>
                 <button type="button" class="po-icon-button po-close" aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
@@ -519,18 +629,20 @@ function bindSavedItem(item, group, index) {
 
 function handleActivePresetChange() {
     closeManager();
-    schedulePromptRender();
     ensureLaunchers();
+    schedulePromptRender();
 }
 
 function init() {
     store();
     migrateSettings();
+    ensureSettingsToggle();
     ensureLaunchers();
+    setTimeout(ensureSettingsToggle, 500);
     setTimeout(ensureLaunchers, 500);
+    setTimeout(ensureSettingsToggle, 1500);
     setTimeout(ensureLaunchers, 1500);
-    attachPromptObserver();
-    schedulePromptRender();
+    applyEnabledState();
 
     const c = context();
     c.eventSource?.on?.(c.eventTypes?.OAI_PRESET_CHANGED_AFTER || 'oai_preset_changed_after', handleActivePresetChange);
@@ -553,3 +665,4 @@ if (document.readyState === 'loading') {
 } else {
     init();
 }
+

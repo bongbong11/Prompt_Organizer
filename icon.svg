@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="접어">
+  <path d="M8 10 34 4l22 13-9 39-29 4L8 10Zm8 6 7 35 18-3 7-28-16-9-16 5Z"/>
+  <path d="m16 16 16-5-9 40-7-35Zm16-5 16 9-25 31 9-40Zm-9 40 25-31-7 28-18 3Z" opacity=".58"/>
+  <path d="m32 11 9 37-18 3 9-40Z" opacity=".28"/>
+</svg>
+

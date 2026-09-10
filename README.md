@@ -1,4 +1,4 @@
-# Prompt Organizer
+# 접어 (Prompt Organizer)
 
 SillyTavern Chat Completion Prompt Manager를 정리하기 위한 UI 전용 확장입니다.
 
@@ -13,6 +13,8 @@ SillyTavern Chat Completion Prompt Manager를 정리하기 위한 UI 전용 확�
 - 저장된 구분선 수정/삭제
 - SillyTavern 테마 CSS 변수 연동
 - 모바일 대응 한글 UI
+- 채팅 입력창 옆 종이접기 아이콘 및 마법봉 메뉴의 **접어** 실행 항목
+- 확장 설정의 **확장 사용** 토글로 화면 적용을 일시 해제하고 저장 상태 그대로 복원
 
 ## 설치
 
@@ -22,7 +24,7 @@ SillyTavern의 확장 설치 화면에서 이 저장소 URL을 사용합니다.
 
 ## 사용
 
-OpenAI 사전 설정의 토글 프리셋 영역에서 **그룹 관리** 옆의 **프롬프트 정리** 버튼 또는 확장 메뉴의 **프롬프트 정리**를 엽니다.
+채팅 입력창 옆의 종이접기 아이콘 또는 마법봉 메뉴의 **접어**를 엽니다.
 
 1. 현재 OpenAI 사전 설정에서 사용할 프리셋을 선택합니다.
 2. **프롬프트 정리**를 열면 그 프리셋과 Prompt Manager의 현재 프롬프트 순서를 그대로 읽습니다.
@@ -42,3 +44,4 @@ Prompt Organizer는 현재 Prompt Manager 상태를 읽어 화면 정리 기준�
 - 생성 직전 API 전송 배열에 개입하지 않음
 
 접기는 Prompt Manager DOM 표시만 바꾸며 실제 프롬프트 주입과 전송 구조에는 영향을 주지 않습니다.
+

@@ -1,11 +1,12 @@
 {
-  "display_name": "프롬프트 정리",
+  "display_name": "접어",
   "name": "Prompt_Organizer",
-  "version": "0.3.4",
-  "description": "UI-only prompt organizer for SillyTavern Chat Completion Prompt Manager.",
+  "version": "0.4.0",
+  "description": "SillyTavern Chat Completion Prompt Manager의 구분선과 접기 UI 확장.",
   "js": "index.js",
   "css": "style.css",
   "author": "bongbong11",
   "homepage": "https://github.com/bongbong11/Prompt_Organizer",
   "loading_order": 25
 }
+

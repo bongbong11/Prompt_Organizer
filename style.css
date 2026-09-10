@@ -1,5 +1,52 @@
 .po-modal-open { overflow: hidden; }
 
+.po-toolbar-launcher {
+    position: relative;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    color: inherit;
+    background: transparent;
+    opacity: .8;
+    cursor: pointer;
+    user-select: none;
+}
+
+.po-toolbar-launcher:hover {
+    opacity: 1;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
+}
+
+.po-asset-icon {
+    display: block;
+    width: 22px;
+    height: 22px;
+    background: currentColor;
+    -webkit-mask: url('./icon.svg') center / contain no-repeat;
+    mask: url('./icon.svg') center / contain no-repeat;
+}
+
+.po-toolbar-launcher .po-asset-icon {
+    width: 22px;
+    height: 22px;
+}
+
+.po-menu-icon {
+    width: 1.15em;
+    height: 1.15em;
+    flex: 0 0 1.15em;
+}
+
+.po-enabled-setting {
+    margin: 8px 0;
+}
+
 .po-management-launcher {
     min-width: 0;
     white-space: nowrap;
@@ -397,3 +444,4 @@
     .po-member { min-height: 29px; }
     .po-hint { display: none; }
 }
+

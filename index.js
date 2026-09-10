@@ -8,7 +8,7 @@ const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
 const PRESET_SELECTORS = ['#settings_perset_openai', '#openai_preset', '#completion_preset'];
 
-const defaults = { version: 2, groupsByPreset: {} };
+const defaults = { version: 3, groupsByPreset: {} };
 let promptObserver = null;
 let observedPromptList = null;
 let renderTimer = null;
@@ -21,6 +21,22 @@ function store() {
     c.extensionSettings[KEY] ??= structuredClone(defaults);
     c.extensionSettings[KEY].groupsByPreset ??= {};
     return c.extensionSettings[KEY];
+}
+
+function migrateSettings() {
+    const data = store();
+    let changed = data.version !== 3;
+    data.version = 3;
+
+    for (const list of Object.values(data.groupsByPreset)) {
+        if (!Array.isArray(list)) continue;
+        for (const group of list) {
+            if ('merge' in group) { delete group.merge; changed = true; }
+            if ('role' in group) { delete group.role; changed = true; }
+        }
+    }
+
+    if (changed) save();
 }
 
 function presetName() {
@@ -39,7 +55,6 @@ function groups() {
 }
 
 function save() {
-    // Only extensionSettings are persisted. Preset prompts/order are never written here.
     context().saveSettingsDebounced();
 }
 
@@ -61,15 +76,6 @@ function promptItems() {
         name: el.querySelector('.completion_prompt_manager_prompt_name, .prompt_manager_prompt_name')?.textContent?.trim() || el.dataset.pmIdentifier,
         el,
     }));
-}
-
-function promptDefinitions() {
-    const prompts = context().chatCompletionSettings?.prompts;
-    return Array.isArray(prompts) ? prompts : [];
-}
-
-function roleLabel(role) {
-    return ({ system: '시스템', user: '사용자', assistant: '어시스턴트' })[role] || '시스템';
 }
 
 function clearDecorations() {
@@ -103,8 +109,7 @@ function renderPromptManager() {
                 ? `<button type="button" class="po-fold" aria-label="접기/펼치기"><i class="fa-solid fa-chevron-${group.collapsed ? 'right' : 'down'}"></i></button>`
                 : '<span class="po-fold-spacer"></span>'}
             <span class="po-divider-title">${escapeHtml(group.name || '구분선')}</span>
-            <span class="po-divider-line"></span>
-            ${group.merge ? `<span class="po-role">${escapeHtml(roleLabel(group.role))}</span>` : ''}`;
+            <span class="po-divider-line"></span>`;
 
         group.position === 'after' ? anchor.after(divider) : anchor.before(divider);
 
@@ -127,16 +132,15 @@ function renderPromptManager() {
 function attachPromptObserver() {
     const list = document.querySelector('#completion_prompt_manager_list');
     if (!list) return;
-    if (observedPromptList === list && promptObserver) {
-        promptObserver.observe(list, { childList: true, subtree: true });
-        return;
+
+    if (observedPromptList !== list || !promptObserver) {
+        promptObserver?.disconnect();
+        observedPromptList = list;
+        promptObserver = new MutationObserver(() => {
+            if (!rendering) schedulePromptRender();
+        });
     }
 
-    promptObserver?.disconnect();
-    observedPromptList = list;
-    promptObserver = new MutationObserver(() => {
-        if (!rendering) schedulePromptRender();
-    });
     promptObserver.observe(list, { childList: true, subtree: true });
 }
 
@@ -196,7 +200,7 @@ function openManager() {
             <div class="po-modal-body">
                 <div class="po-topbar"><button type="button" class="menu_button po-add"><i class="fa-solid fa-plus"></i> 구분선 추가</button></div>
                 <div class="po-groups"></div>
-                <div class="po-help">구분선은 화면 표시용이야. 프리셋 내용과 순서는 바꾸지 않아. 묶어서 전송을 켠 그룹만 전송 직전에 한 메시지로 합쳐져.</div>
+                <div class="po-help">이 확장은 Prompt Manager 화면의 구분선과 접기 상태만 관리해. 프롬프트 내용, 역할, 깊이, 순서, 활성 상태와 실제 전송 구조는 건드리지 않아.</div>
             </div>
         </section>`;
 
@@ -214,6 +218,7 @@ function renderGroupCards() {
 
     const prompts = promptItems();
     box.replaceChildren();
+
     if (!groups().length) {
         box.innerHTML = '<div class="po-empty">아직 만든 구분선이 없어.</div>';
         return;
@@ -236,12 +241,8 @@ function renderGroupCards() {
                 <label><span>구분선 위치</span><select class="text_pole po-position"><option value="before" ${group.position !== 'after' ? 'selected' : ''}>앞에</option><option value="after" ${group.position === 'after' ? 'selected' : ''}>뒤에</option></select></label>
             </div>
             <label class="checkbox_label po-toggle"><input class="po-collapsible" type="checkbox" ${group.collapsible ? 'checked' : ''}><span>접기 가능한 구분선</span></label>
-            <div class="po-label-row"><span>묶을 프롬프트</span><small>${(group.members || []).length}개 선택</small></div>
-            <div class="po-members">${members || '<div class="po-empty-small">Prompt Manager를 한 번 열면 목록을 불러올 수 있어.</div>'}</div>
-            <div class="po-injection">
-                <label class="checkbox_label po-toggle"><input class="po-merge" type="checkbox" ${group.merge ? 'checked' : ''}><span>하나의 메시지로 묶어서 전송</span></label>
-                <label class="po-role-row ${group.merge ? '' : 'po-disabled'}"><span>묶음 역할</span><select class="text_pole po-role-select" ${group.merge ? '' : 'disabled'}><option value="system" ${group.role === 'system' ? 'selected' : ''}>시스템 (System)</option><option value="user" ${group.role === 'user' ? 'selected' : ''}>사용자 (User)</option><option value="assistant" ${group.role === 'assistant' ? 'selected' : ''}>어시스턴트 (Assistant)</option></select></label>
-            </div>`;
+            <div class="po-label-row"><span>이 구분선에 포함할 프롬프트</span><small>${(group.members || []).length}개 선택</small></div>
+            <div class="po-members">${members || '<div class="po-empty-small">Prompt Manager를 한 번 열면 목록을 불러올 수 있어.</div>'}</div>`;
 
         box.append(card);
         bindGroupCard(card, group, index);
@@ -249,11 +250,23 @@ function renderGroupCards() {
 }
 
 function bindGroupCard(card, group, index) {
-    const persistAndRender = () => { save(); schedulePromptRender(); };
+    const persistAndRender = () => {
+        save();
+        schedulePromptRender();
+    };
 
-    card.querySelector('.po-name').addEventListener('input', event => { group.name = event.target.value; persistAndRender(); });
-    card.querySelector('.po-anchor').addEventListener('change', event => { group.anchor = event.target.value; persistAndRender(); });
-    card.querySelector('.po-position').addEventListener('change', event => { group.position = event.target.value; persistAndRender(); });
+    card.querySelector('.po-name').addEventListener('input', event => {
+        group.name = event.target.value;
+        persistAndRender();
+    });
+    card.querySelector('.po-anchor').addEventListener('change', event => {
+        group.anchor = event.target.value;
+        persistAndRender();
+    });
+    card.querySelector('.po-position').addEventListener('change', event => {
+        group.position = event.target.value;
+        persistAndRender();
+    });
     card.querySelector('.po-collapsible').addEventListener('change', event => {
         group.collapsible = event.target.checked;
         if (!group.collapsible) group.collapsed = false;
@@ -265,13 +278,6 @@ function bindGroupCard(card, group, index) {
         renderGroupCards();
         schedulePromptRender();
     }));
-    card.querySelector('.po-merge').addEventListener('change', event => {
-        group.merge = event.target.checked;
-        save();
-        renderGroupCards();
-        schedulePromptRender();
-    });
-    card.querySelector('.po-role-select').addEventListener('change', event => { group.role = event.target.value; persistAndRender(); });
     card.querySelector('.po-delete').addEventListener('click', () => {
         groups().splice(index, 1);
         save();
@@ -283,61 +289,17 @@ function bindGroupCard(card, group, index) {
 function addGroup() {
     const firstPrompt = promptItems()[0];
     groups().push({
-        id: makeId(), name: '새 구분선', anchor: firstPrompt?.id || '', position: 'before',
-        collapsible: false, collapsed: false, members: [], merge: false, role: 'system',
+        id: makeId(),
+        name: '새 구분선',
+        anchor: firstPrompt?.id || '',
+        position: 'before',
+        collapsible: true,
+        collapsed: false,
+        members: [],
     });
     save();
     renderGroupCards();
     schedulePromptRender();
-}
-
-function normalize(value) {
-    return typeof value === 'string' ? value.trim() : '';
-}
-
-function preparedPromptTextMap() {
-    const c = context();
-    const result = new Map();
-    for (const prompt of promptDefinitions()) {
-        if (!prompt?.identifier || typeof prompt.content !== 'string' || !prompt.content.trim()) continue;
-        let content = prompt.content;
-        try { content = c.substituteParams?.(content) ?? content; } catch { /* keep original text */ }
-        result.set(prompt.identifier, normalize(content));
-    }
-    return result;
-}
-
-function mergeConfiguredGroups(eventData) {
-    // This mutates only the ephemeral outgoing request array. It never mutates preset data.
-    if (!Array.isArray(eventData?.chat)) return;
-    const textById = preparedPromptTextMap();
-    const claimedIndexes = new Set();
-
-    for (const group of groups()) {
-        if (!group.merge || !group.members?.length) continue;
-
-        const indexes = [];
-        for (const id of group.members) {
-            const expected = textById.get(id);
-            if (!expected) continue;
-            const index = eventData.chat.findIndex((message, i) =>
-                !claimedIndexes.has(i)
-                && ['system', 'user', 'assistant'].includes(message?.role)
-                && typeof message?.content === 'string'
-                && normalize(message.content) === expected);
-            if (index >= 0) {
-                indexes.push(index);
-                claimedIndexes.add(index);
-            }
-        }
-
-        if (indexes.length < 2) continue;
-        indexes.sort((a, b) => a - b);
-        const first = indexes[0];
-        const mergedContent = indexes.map(index => eventData.chat[index].content).join('\n\n');
-        eventData.chat[first] = { ...eventData.chat[first], role: group.role || 'system', content: mergedContent };
-        for (let i = indexes.length - 1; i > 0; i--) eventData.chat.splice(indexes[i], 1);
-    }
 }
 
 function handlePresetChange() {
@@ -347,6 +309,7 @@ function handlePresetChange() {
 
 function init() {
     store();
+    migrateSettings();
     ensureLaunchers();
     setTimeout(ensureLaunchers, 750);
     attachPromptObserver();
@@ -354,7 +317,6 @@ function init() {
 
     const c = context();
     c.eventSource?.on?.(c.eventTypes?.OAI_PRESET_CHANGED_AFTER || 'oai_preset_changed_after', handlePresetChange);
-    c.eventSource?.on?.(c.eventTypes?.CHAT_COMPLETION_PROMPT_READY || 'chat_completion_prompt_ready', mergeConfiguredGroups);
 
     document.addEventListener('change', event => {
         if (PRESET_SELECTORS.some(selector => event.target?.matches?.(selector))) handlePresetChange();

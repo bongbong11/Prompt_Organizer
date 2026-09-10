@@ -1,8 +1,4 @@
-#prompt-organizer-toolbar-button {
-    order: 5;
-    padding: 1px;
-}
-
+#prompt-organizer-toolbar-button { order: 5; padding: 1px; }
 .po-launcher { cursor: pointer; }
 .po-modal-open { overflow: hidden; }
 
@@ -23,8 +19,8 @@
 }
 
 .po-modal {
-    width: min(680px, calc(100% - 32px));
-    max-height: min(820px, calc(100% - 32px));
+    width: min(760px, calc(100% - 24px));
+    max-height: min(760px, calc(100% - 32px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -34,20 +30,11 @@
     box-shadow: 0 12px 40px rgb(0 0 0 / .28);
 }
 
-.po-modal button,
-.po-modal .menu_button,
-.po-modal select,
-.po-modal option {
+.po-modal button, .po-modal .menu_button, .po-modal select, .po-modal option {
     writing-mode: horizontal-tb;
     word-break: keep-all;
 }
-
-.po-modal button,
-.po-modal .menu_button {
-    white-space: nowrap;
-    overflow-wrap: normal;
-    flex-shrink: 0;
-}
+.po-modal button, .po-modal .menu_button { white-space: nowrap; overflow-wrap: normal; flex-shrink: 0; }
 
 .po-modal-header {
     flex: 0 0 auto;
@@ -55,166 +42,92 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 13px 14px 11px;
+    padding: 11px 13px 9px;
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
 }
-
+.po-title-row { display: flex; align-items: center; gap: 8px; }
 .po-modal-title { font-size: 1rem; font-weight: 700; }
-.po-preset-line { margin-top: 2px; font-size: .75rem; opacity: .62; }
+.po-save-state { font-size: .68rem; opacity: .48; white-space: nowrap; }
+.po-save-state.po-saved { opacity: .9; }
+.po-preset-line { margin-top: 2px; font-size: .72rem; opacity: .62; }
+
 .po-modal-body {
     min-height: 0;
     overflow-y: auto;
+    overflow-anchor: none;
     overscroll-behavior: contain;
-    padding: 12px 14px 16px;
+    padding: 10px 12px 13px;
 }
-.po-topbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
-.po-groups { display: flex; flex-direction: column; gap: 10px; }
-
+.po-topbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.po-groups { display: flex; flex-direction: column; gap: 9px; }
 .po-card {
     min-width: 0;
-    padding: 11px;
+    padding: 10px;
     border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 16%, transparent);
     border-radius: 11px;
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
 }
-
-.po-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.po-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .po-card-head .po-name { flex: 1; min-width: 0; font-weight: 600; }
 .po-icon-button {
-    width: 36px;
-    height: 36px;
-    flex: 0 0 36px;
-    display: grid;
-    place-items: center;
-    padding: 0;
-    border: 0;
-    border-radius: 8px;
-    color: inherit;
-    background: transparent;
-    cursor: pointer;
+    width: 34px; height: 34px; flex: 0 0 34px;
+    display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px;
+    color: inherit; background: transparent; cursor: pointer;
 }
 .po-icon-button:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent); }
 .po-delete { opacity: .62; }
 
-.po-grid {
+.po-card-layout {
     display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(120px, 1fr);
-    gap: 8px;
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+    gap: 10px;
+    align-items: start;
 }
-.po-grid label {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
-    font-size: .78rem;
-}
+.po-card-settings, .po-card-members-pane { min-width: 0; }
+.po-grid { display: grid; grid-template-columns: minmax(0, 1fr) 86px; gap: 7px; }
+.po-grid label { min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: .76rem; }
 .po-grid select { width: 100%; min-width: 0; }
-.po-toggle { margin: 10px 0; }
-.po-label-row { display: flex; justify-content: space-between; gap: 8px; font-size: .78rem; opacity: .72; }
+.po-toggle { margin: 9px 0 0; }
+.po-label-row { display: flex; justify-content: space-between; gap: 8px; font-size: .76rem; opacity: .72; }
 .po-label-row small { white-space: nowrap; }
-
 .po-members {
-    max-height: 210px;
+    height: 150px;
     overflow-y: auto;
+    overflow-anchor: none;
+    overscroll-behavior: contain;
     margin-top: 5px;
-    padding: 4px 7px;
+    padding: 3px 7px;
     border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
     border-radius: 8px;
 }
-.po-member {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 32px;
-    padding: 3px 1px;
-    cursor: pointer;
-}
-.po-member span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.po-empty, .po-help, .po-empty-small { opacity: .62; font-size: .78rem; line-height: 1.45; }
-.po-empty { padding: 18px 4px; text-align: center; }
-.po-help { padding: 12px 2px 2px; }
+.po-member { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 1px; cursor: pointer; }
+.po-member span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.po-empty, .po-help, .po-empty-small { opacity: .62; font-size: .76rem; line-height: 1.4; }
+.po-empty { padding: 16px 4px; text-align: center; }
+.po-help { padding: 9px 2px 1px; }
 .po-empty-small { padding: 5px 2px; }
 
-.po-divider {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 30px;
-    margin: 6px 2px 3px;
-    padding: 0 7px;
-    color: var(--SmartThemeBodyColor);
-    user-select: none;
-}
-.po-divider-title {
-    max-width: 55%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: .75rem;
-    font-weight: 700;
-    letter-spacing: .045em;
-    white-space: nowrap;
-    opacity: .82;
-}
-.po-divider-line {
-    height: 1px;
-    flex: 1;
-    background: color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent);
-}
-.po-fold {
-    width: 22px;
-    height: 28px;
-    padding: 0;
-    border: 0;
-    color: inherit;
-    background: transparent;
-    opacity: .7;
-    cursor: pointer;
-}
+.po-divider { display: flex; align-items: center; gap: 7px; min-height: 30px; margin: 6px 2px 3px; padding: 0 7px; color: var(--SmartThemeBodyColor); user-select: none; }
+.po-divider-title { max-width: 55%; overflow: hidden; text-overflow: ellipsis; font-size: .75rem; font-weight: 700; letter-spacing: .045em; white-space: nowrap; opacity: .82; }
+.po-divider-line { height: 1px; flex: 1; background: color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent); }
+.po-fold { width: 22px; height: 28px; padding: 0; border: 0; color: inherit; background: transparent; opacity: .7; cursor: pointer; }
 .po-fold-spacer { width: 22px; }
 .po-group-hidden { display: none !important; }
 
 @media (max-width: 700px) {
-    .po-modal-overlay {
-        padding:
-            max(18px, env(safe-area-inset-top))
-            10px
-            max(18px, env(safe-area-inset-bottom));
-    }
-
-    .po-modal {
-        width: min(100%, 620px);
-        max-height: min(72%, 620px);
-        border-radius: 14px;
-    }
-
-    .po-modal-header { padding: 11px 12px 9px; }
-    .po-modal-body { padding: 10px 11px 14px; }
+    .po-modal-overlay { padding: max(16px, env(safe-area-inset-top)) 7px max(16px, env(safe-area-inset-bottom)); }
+    .po-modal { width: 100%; max-height: min(70%, 600px); border-radius: 13px; }
+    .po-modal-header { padding: 9px 10px 8px; }
+    .po-modal-body { padding: 8px 9px 11px; }
+    .po-card { padding: 8px; }
+    .po-card-layout { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 7px; }
     .po-grid { grid-template-columns: 1fr; }
-    .po-members { max-height: min(220px, 28dvh); }
-    .po-card { padding: 10px; }
-    .po-topbar .menu_button {
-        min-height: 36px;
-        max-width: 100%;
-    }
+    .po-members { height: min(170px, 24dvh); }
+    .po-topbar .menu_button { min-height: 34px; max-width: 100%; }
 }
 
-@media (max-width: 420px) {
-    .po-modal-overlay {
-        padding:
-            max(14px, env(safe-area-inset-top))
-            6px
-            max(14px, env(safe-area-inset-bottom));
-    }
-
-    .po-modal {
-        width: 100%;
-        max-height: 72%;
-        border-radius: 12px;
-    }
+@media (max-width: 390px) {
+    .po-card-layout { grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 6px; }
+    .po-modal { max-height: 68%; }
+    .po-member { min-height: 29px; }
 }

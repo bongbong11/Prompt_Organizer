@@ -150,7 +150,6 @@ function promptsForPreset(name) {
         return [...byId.values()];
     }
 
-    /* Exact Prompt Manager order only. Definitions absent from prompt_order are not appended. */
     return order
         .map(entry => byId.get(String(entry?.identifier ?? '')))
         .filter(Boolean);
@@ -246,9 +245,25 @@ function attachPromptObserver() {
     promptObserver.observe(list, { childList: true, subtree: true });
 }
 
-function findGroupManagementButton() {
-    const candidates = document.querySelectorAll('button, .menu_button, [role="button"]');
-    return [...candidates].find(el => el.id !== MANAGEMENT_BUTTON_ID && el.textContent?.trim() === '그룹 관리') || null;
+function openAiPresetPanel() {
+    const presetSelect = document.querySelector('#settings_perset_openai, #openai_preset, #completion_preset');
+    if (!presetSelect) return null;
+
+    return presetSelect.closest(
+        '#openai_settings, #ai_response_configuration, .inline-drawer-content, .drawer-content, .settings-content',
+    ) || presetSelect.parentElement?.parentElement || null;
+}
+
+function findToggleGroupManagementButton() {
+    const panel = openAiPresetPanel();
+    if (!panel) return null;
+
+    const candidates = panel.querySelectorAll('button, .menu_button, [role="button"]');
+    return [...candidates].find(el => {
+        if (el.id === MANAGEMENT_BUTTON_ID) return false;
+        const text = el.textContent?.replace(/\s+/g, ' ').trim();
+        return text === '그룹 관리' || text === 'Manage groups';
+    }) || null;
 }
 
 function createManagementLauncher(anchor) {
@@ -264,14 +279,18 @@ function createManagementLauncher(anchor) {
 }
 
 function ensureLaunchers() {
-    /* Clean up the obsolete chat-input launcher from pre-0.3 versions. */
     document.getElementById('prompt-organizer-toolbar-button')?.remove();
 
-    if (!document.getElementById(MANAGEMENT_BUTTON_ID)) {
-        const textAnchor = findGroupManagementButton();
-        const fallbackAnchor = document.getElementById('rm_button_characters') || document.getElementById('rm_button_selected_ch');
-        const anchor = textAnchor || fallbackAnchor;
-        if (anchor) createManagementLauncher(anchor);
+    const anchor = findToggleGroupManagementButton();
+    const existing = document.getElementById(MANAGEMENT_BUTTON_ID);
+
+    if (anchor) {
+        if (!existing || existing.previousElementSibling !== anchor) {
+            existing?.remove();
+            createManagementLauncher(anchor);
+        }
+    } else {
+        existing?.remove();
     }
 
     const menu = document.getElementById('extensionsMenu');
@@ -553,6 +572,7 @@ function bindSavedItem(item, group, index) {
 
 function handleActivePresetChange() {
     schedulePromptRender();
+    ensureLaunchers();
     const note = document.querySelector(`#${MODAL_ID} .po-active-preset-note`);
     if (note) note.textContent = `현재 사용 중 · ${activePresetName() || '없음'}`;
 }

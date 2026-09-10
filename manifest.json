@@ -1,12 +1,11 @@
 {
   "display_name": "프롬프트 정리",
-  "loading_order": 25,
-  "requires": [],
-  "optional": [],
+  "name": "Prompt_Organizer",
+  "version": "0.3.4",
+  "description": "UI-only prompt organizer for SillyTavern Chat Completion Prompt Manager.",
   "js": "index.js",
   "css": "style.css",
   "author": "bongbong11",
-  "version": "0.3.3",
-  "homePage": "https://github.com/bongbong11/Prompt_Organizer",
-  "auto_update": true
+  "homepage": "https://github.com/bongbong11/Prompt_Organizer",
+  "loading_order": 25
 }

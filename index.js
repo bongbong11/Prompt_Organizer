@@ -10,7 +10,7 @@ const WAND_CONTAINER_ID = 'prompt-organizer-wand-container';
 const WAND_ID = 'prompt-organizer-wand-item';
 const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
-const SETTINGS_VERSION = 9;
+const SETTINGS_VERSION = 10;
 
 const defaults = { version: SETTINGS_VERSION, enabled: true, groupsByPreset: {} };
 
@@ -488,6 +488,114 @@ function memberOptions(selected = []) {
     return availablePrompts().map(prompt => `<label class="po-member"><input type="checkbox" value="${escapeHtml(prompt.id)}" ${selected.includes(prompt.id) ? 'checked' : ''}><span>${escapeHtml(prompt.name)}</span></label>`).join('');
 }
 
+function rangePromptOptions(selectedId = '') {
+    return availablePrompts().map(prompt =>
+        `<option value="${escapeHtml(prompt.id)}" ${prompt.id === selectedId ? 'selected' : ''}>${escapeHtml(prompt.name)}</option>`
+    ).join('');
+}
+
+function memberToolsHtml(selected = []) {
+    const prompts = availablePrompts();
+    if (!prompts.length) return '';
+    const selectedSet = new Set((selected || []).map(String));
+    const selectedIndexes = prompts
+        .map((prompt, index) => selectedSet.has(prompt.id) ? index : -1)
+        .filter(index => index >= 0);
+    const startIndex = selectedIndexes.length ? Math.min(...selectedIndexes) : 0;
+    const endIndex = selectedIndexes.length ? Math.max(...selectedIndexes) : prompts.length - 1;
+    return `
+        <div class="po-member-tools">
+            <input type="search" class="text_pole po-member-search" placeholder="프롬프트 검색..." autocomplete="off">
+            <div class="po-member-quick-actions">
+                <button type="button" class="menu_button po-select-visible">전체 선택</button>
+                <button type="button" class="menu_button po-clear-members">전체 해제</button>
+                <span class="po-shift-hint">PC: Shift+클릭으로 연속 선택</span>
+            </div>
+            <div class="po-member-range">
+                <select class="text_pole po-range-start" aria-label="범위 시작">${rangePromptOptions(prompts[startIndex]?.id || '')}</select>
+                <span>~</span>
+                <select class="text_pole po-range-end" aria-label="범위 끝">${rangePromptOptions(prompts[endIndex]?.id || '')}</select>
+                <button type="button" class="menu_button po-apply-range">이 범위만 선택</button>
+            </div>
+        </div>`;
+}
+
+function bindMemberTools(scope, onChange) {
+    const memberBox = scope?.querySelector('.po-members');
+    if (!memberBox) return;
+    const inputs = [...memberBox.querySelectorAll('.po-member input')];
+    const labels = inputs.map(input => input.closest('.po-member'));
+    let lastIndex = null;
+
+    const changed = () => onChange?.();
+
+    inputs.forEach((input, index) => {
+        input.addEventListener('click', event => {
+            if (event.shiftKey && lastIndex !== null) {
+                const from = Math.min(lastIndex, index);
+                const to = Math.max(lastIndex, index);
+                for (let i = from; i <= to; i++) inputs[i].checked = input.checked;
+            }
+            lastIndex = index;
+        });
+        input.addEventListener('change', changed);
+    });
+
+    scope.querySelector('.po-member-search')?.addEventListener('input', event => {
+        const query = event.target.value.trim().toLocaleLowerCase();
+        labels.forEach(label => {
+            const matches = !query || label.textContent.toLocaleLowerCase().includes(query);
+            label.hidden = !matches;
+        });
+    });
+
+    scope.querySelector('.po-select-visible')?.addEventListener('click', () => {
+        labels.forEach((label, index) => {
+            if (!label.hidden) inputs[index].checked = true;
+        });
+        changed();
+    });
+
+    scope.querySelector('.po-clear-members')?.addEventListener('click', () => {
+        inputs.forEach(input => input.checked = false);
+        changed();
+    });
+
+    scope.querySelector('.po-apply-range')?.addEventListener('click', () => {
+        const ids = availablePrompts().map(prompt => prompt.id);
+        const startId = scope.querySelector('.po-range-start')?.value;
+        const endId = scope.querySelector('.po-range-end')?.value;
+        const start = ids.indexOf(startId);
+        const end = ids.indexOf(endId);
+        if (start < 0 || end < 0) return;
+        const from = Math.min(start, end);
+        const to = Math.max(start, end);
+        inputs.forEach((input, index) => input.checked = index >= from && index <= to);
+        changed();
+    });
+}
+
+function notify(message) {
+    if (window.toastr?.success) window.toastr.success(message, '접어');
+    else console.log('[Prompt Organizer]', message);
+}
+
+function copyCurrentPresetGroupsTo(targetPreset) {
+    const target = String(targetPreset || '').trim();
+    if (!target) return false;
+    const data = store().groupsByPreset;
+    const source = currentGroups();
+    if (target === currentPresetName()) return false;
+    if (Array.isArray(data[target]) && data[target].length) {
+        const replace = confirm(`“${target}”에 이미 구분선 ${data[target].length}개가 있어. 기존 설정을 지우고 현재 프리셋 구성을 복사할까?`);
+        if (!replace) return false;
+    }
+    data[target] = source.map(group => ({ ...structuredClone(group), id: makeId(), collapsed: false }));
+    save();
+    notify(`“${target}”로 구분선 ${source.length}개를 복사했어.`);
+    return true;
+}
+
 function renderCreateTab(content) {
     const firstPrompt = availablePrompts()[0];
     content.innerHTML = `
@@ -503,6 +611,7 @@ function renderCreateTab(content) {
                 </div>
                 <div class="po-card-members-pane">
                     <div class="po-label-row"><span>접을 프롬프트</span><small class="po-new-count">0개</small></div>
+                    ${memberToolsHtml([])}
                     <div class="po-members po-new-members">${memberOptions([]) || '<div class="po-empty-small">현재 프리셋에서 프롬프트를 읽지 못했어.</div>'}</div>
                 </div>
             </div>
@@ -512,11 +621,13 @@ function renderCreateTab(content) {
             </div>
         </section>`;
 
-    const memberBox = content.querySelector('.po-new-members');
-    memberBox?.querySelectorAll('input').forEach(input => input.addEventListener('change', () => {
+    const updateCount = () => {
+        const memberBox = content.querySelector('.po-new-members');
         const count = content.querySelector('.po-new-count');
-        if (count) count.textContent = `${memberBox.querySelectorAll('input:checked').length}개`;
-    }));
+        if (memberBox && count) count.textContent = `${memberBox.querySelectorAll('input:checked').length}개`;
+    };
+    bindMemberTools(content, updateCount);
+    updateCount();
 
     content.querySelector('.po-create-save')?.addEventListener('click', () => {
         const anchor = content.querySelector('.po-new-anchor')?.value || '';
@@ -547,8 +658,29 @@ function renderSavedTab(content) {
         return;
     }
 
-    content.innerHTML = '<div class="po-saved-list"></div>';
+    content.innerHTML = `
+        <div class="po-saved-toolbar">
+            <button type="button" class="menu_button po-collapse-all"><i class="fa-solid fa-angles-up"></i> 모두 접기</button>
+            <button type="button" class="menu_button po-expand-all"><i class="fa-solid fa-angles-down"></i> 모두 펼치기</button>
+            <button type="button" class="menu_button po-copy-preset"><i class="fa-solid fa-copy"></i> 다른 프리셋으로 복사</button>
+        </div>
+        <div class="po-saved-list"></div>`;
     const list = content.querySelector('.po-saved-list');
+
+    content.querySelector('.po-collapse-all')?.addEventListener('click', () => {
+        saved.forEach(group => { if (group.collapsible) group.collapsed = true; });
+        save(); schedulePromptRender();
+    });
+    content.querySelector('.po-expand-all')?.addEventListener('click', () => {
+        saved.forEach(group => { if (group.collapsible) group.collapsed = false; });
+        save(); schedulePromptRender();
+    });
+    content.querySelector('.po-copy-preset')?.addEventListener('click', () => {
+        const known = Object.keys(store().groupsByPreset).filter(name => name !== currentPresetName());
+        const hint = known.length ? `\n이미 접어 설정이 있는 프리셋: ${known.join(', ')}` : '';
+        const target = window.prompt(`복사할 대상 프리셋 이름을 정확히 입력해.${hint}`, known[0] || '');
+        if (target !== null) copyCurrentPresetGroupsTo(target);
+    });
 
     saved.forEach((group, index) => {
         const item = document.createElement('section');
@@ -574,8 +706,12 @@ function renderSavedTab(content) {
                     </div>
                     <div class="po-card-members-pane">
                         <div class="po-label-row"><span>접을 프롬프트</span><small class="po-member-count">${(group.members || []).length}개</small></div>
+                        ${memberToolsHtml(group.members || [])}
                         <div class="po-members">${memberOptions(group.members || []) || '<div class="po-empty-small">현재 프리셋에서 프롬프트를 읽지 못했어.</div>'}</div>
                     </div>
+                </div>
+                <div class="po-edit-actions">
+                    <button type="button" class="menu_button po-duplicate-group"><i class="fa-solid fa-clone"></i> 이 구분선 복제</button>
                 </div>
             </div>`;
         list.append(item);
@@ -615,11 +751,20 @@ function bindSavedItem(item, group, index) {
         if (!group.collapsible) group.collapsed = false;
         save(); updateSummary(); schedulePromptRender();
     });
-    item.querySelectorAll('.po-member input').forEach(input => input.addEventListener('change', () => {
+    const syncMembers = () => {
         group.members = [...item.querySelectorAll('.po-member input:checked')].map(el => el.value);
         item.querySelector('.po-member-count').textContent = `${group.members.length}개`;
         save(); updateSummary(); schedulePromptRender();
-    }));
+    };
+    bindMemberTools(item, syncMembers);
+    item.querySelector('.po-duplicate-group')?.addEventListener('click', () => {
+        const copy = structuredClone(group);
+        copy.id = makeId();
+        copy.name = `${group.name || '구분선'} 복사본`;
+        copy.collapsed = false;
+        currentGroups().splice(index + 1, 0, copy);
+        save(); schedulePromptRender(); renderActiveTab();
+    });
     item.querySelector('.po-delete-saved')?.addEventListener('click', () => {
         if (!confirm(`“${group.name || '구분선'}”을 삭제할까?`)) return;
         currentGroups().splice(index, 1);

@@ -10,9 +10,16 @@ const WAND_CONTAINER_ID = 'prompt-organizer-wand-container';
 const WAND_ID = 'prompt-organizer-wand-item';
 const DIVIDER_CLASS = 'po-divider';
 const HIDDEN_CLASS = 'po-group-hidden';
-const SETTINGS_VERSION = 10;
+const SETTINGS_VERSION = 11;
 
-const defaults = { version: SETTINGS_VERSION, enabled: true, groupsByPreset: {} };
+const defaults = { version: SETTINGS_VERSION, enabled: true, showChatIcon: true, groupsByPreset: {} };
+const DIVIDER_STYLES = [
+    ['solid', '기본 실선', ''],
+    ['dotted', '점점점 ···', '· '],
+    ['wave', '물결 〜〜', '〜'],
+    ['ornament', '꾸밈선 ✦ ─', '─ ✦ '],
+    ['custom', '커스텀', ''],
+];
 
 let activeTab = 'create';
 let promptObserver = null;
@@ -52,10 +59,22 @@ function save(showState = true) {
 function migrateSettings() {
     const data = store();
     let changed = data.version !== SETTINGS_VERSION;
+    if (typeof data.showChatIcon !== 'boolean') {
+        data.showChatIcon = true;
+        changed = true;
+    }
     data.version = SETTINGS_VERSION;
     for (const list of Object.values(data.groupsByPreset)) {
         if (!Array.isArray(list)) continue;
         for (const group of list) {
+            if (!DIVIDER_STYLES.some(([value]) => value === group.lineStyle)) {
+                group.lineStyle = 'solid';
+                changed = true;
+            }
+            if (typeof group.customLine !== 'string') {
+                group.customLine = '';
+                changed = true;
+            }
             if ('merge' in group) { delete group.merge; changed = true; }
             if ('role' in group) { delete group.role; changed = true; }
         }
@@ -71,6 +90,44 @@ function escapeHtml(value = '') {
 
 function makeId() {
     return `po_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function styleFieldsHtml(group = {}) {
+    return `<label class="po-field"><span>구분선 스타일</span>
+        <select class="text_pole po-line-style">${DIVIDER_STYLES.map(([value, label]) =>
+            `<option value="${value}" ${(group.lineStyle || 'solid') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+        <label class="po-field po-custom-line-field" ${group.lineStyle === 'custom' ? '' : 'hidden'}>
+            <span>커스텀 문자열</span><input class="text_pole po-custom-line" value="${escapeHtml(group.customLine || '')}" placeholder="예: ♡ · ✦ · ">
+            <small>제목 오른쪽에 반복 표시돼. 비워두면 기본 실선이야.</small>
+        </label>`;
+}
+
+function readStyleFields(scope) {
+    return {
+        lineStyle: scope.querySelector('.po-line-style').value,
+        customLine: scope.querySelector('.po-custom-line').value,
+    };
+}
+
+function bindStyleFields(scope, onChange) {
+    scope.querySelector('.po-line-style').addEventListener('change', () => {
+        scope.querySelector('.po-custom-line-field').hidden = readStyleFields(scope).lineStyle !== 'custom';
+        onChange?.(readStyleFields(scope));
+    });
+    scope.querySelector('.po-custom-line').addEventListener('input', () => onChange?.(readStyleFields(scope)));
+}
+
+function renderDividerLine(line, group) {
+    const pattern = group.lineStyle === 'custom'
+        ? (typeof group.customLine === 'string' ? group.customLine : '')
+        : DIVIDER_STYLES.find(([value]) => value === group.lineStyle)?.[2] || '';
+    line.setAttribute('aria-hidden', 'true');
+    if (!pattern.trim()) return;
+    line.classList.add('po-divider-pattern');
+    const text = document.createElement('span');
+    // Repeat complete strings (including emoji sequences), then clip to the available width.
+    text.textContent = pattern.repeat(Math.max(1, Math.ceil(8192 / pattern.length)));
+    line.append(text);
 }
 
 function currentPresetName() {
@@ -265,6 +322,7 @@ function renderPromptManager() {
             : '<span class="po-fold-spacer"></span>'}
             <span class="po-divider-title">${escapeHtml(group.name || '구분선')}</span>
             <span class="po-divider-line"></span>`;
+        renderDividerLine(divider.querySelector('.po-divider-line'), group);
 
         if (!slotMap.has(slot)) slotMap.set(slot, []);
         slotMap.get(slot).push(divider);
@@ -317,7 +375,8 @@ function ensureLaunchers() {
 
     document.getElementById('prompt-organizer-management-button')?.remove();
 
-    if (!document.getElementById(TOOLBAR_ID)) {
+    if (store().showChatIcon === false) document.getElementById(TOOLBAR_ID)?.remove();
+    if (store().showChatIcon !== false && !document.getElementById(TOOLBAR_ID)) {
         const button = document.createElement('div');
         button.id = TOOLBAR_ID;
         button.className = 'interactable po-toolbar-launcher';
@@ -385,17 +444,26 @@ function ensureSettingsToggle() {
             </div>
             <div class="inline-drawer-content">
                 <label class="checkbox_label po-enabled-setting">
-                    <input type="checkbox" ${isEnabled() ? 'checked' : ''}>
+                    <input class="po-enabled-input" type="checkbox" ${isEnabled() ? 'checked' : ''}>
                     <span>확장 사용</span>
+                </label>
+                <label class="checkbox_label po-enabled-setting">
+                    <input class="po-chat-icon-input" type="checkbox" ${store().showChatIcon !== false ? 'checked' : ''}>
+                    <span>채팅 입력창 아이콘 표시</span>
                 </label>
             </div>
         </div>`;
     host.append(settings);
 
-    settings.querySelector('input')?.addEventListener('change', event => {
+    settings.querySelector('.po-enabled-input')?.addEventListener('change', event => {
         store().enabled = event.target.checked;
         save(false);
         applyEnabledState();
+    });
+    settings.querySelector('.po-chat-icon-input').addEventListener('change', event => {
+        store().showChatIcon = event.target.checked;
+        save(false);
+        ensureLaunchers();
     });
 }
 
@@ -603,6 +671,7 @@ function renderCreateTab(content) {
             <div class="po-create-grid">
                 <div class="po-create-settings">
                     <label class="po-field"><span>구분선 이름</span><input class="text_pole po-new-name" value="새 구분선"></label>
+                    ${styleFieldsHtml()}
                     <div class="po-grid">
                         <label><span>기준 프롬프트</span><select class="text_pole po-new-anchor">${promptOptions(firstPrompt?.id || '')}</select></label>
                         <label><span>위치</span><select class="text_pole po-new-position"><option value="before">앞에</option><option value="after">뒤에</option></select></label>
@@ -627,6 +696,7 @@ function renderCreateTab(content) {
         if (memberBox && count) count.textContent = `${memberBox.querySelectorAll('input:checked').length}개`;
     };
     bindMemberTools(content, updateCount);
+    bindStyleFields(content);
     updateCount();
 
     content.querySelector('.po-create-save')?.addEventListener('click', () => {
@@ -635,6 +705,7 @@ function renderCreateTab(content) {
         if (!anchor) return;
         const group = {
             id: makeId(),
+            ...readStyleFields(content),
             name: content.querySelector('.po-new-name')?.value?.trim() || '새 구분선',
             anchor,
             position,
@@ -698,6 +769,7 @@ function renderSavedTab(content) {
                 <div class="po-card-layout">
                     <div class="po-card-settings">
                         <label class="po-field"><span>구분선 이름</span><input class="text_pole po-name" value="${escapeHtml(group.name || '')}"></label>
+                        ${styleFieldsHtml(group)}
                         <div class="po-grid">
                             <label><span>기준 프롬프트</span><select class="text_pole po-anchor">${promptOptions(group.anchor)}</select></label>
                             <label><span>위치</span><select class="text_pole po-position"><option value="before" ${group.position !== 'after' ? 'selected' : ''}>앞에</option><option value="after" ${group.position === 'after' ? 'selected' : ''}>뒤에</option></select></label>
@@ -720,6 +792,10 @@ function renderSavedTab(content) {
 }
 
 function bindSavedItem(item, group, index) {
+    bindStyleFields(item, values => {
+        Object.assign(group, values);
+        save(); schedulePromptRender();
+    });
     const panel = item.querySelector('.po-edit-panel');
     const toggles = item.querySelectorAll('.po-edit-toggle');
     const updateSummary = () => {

@@ -229,7 +229,10 @@
     font-size: .76rem;
 }
 
-.po-field input {
+.po-field[hidden] { display: none !important; }
+
+.po-field input,
+.po-field select {
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
@@ -454,9 +457,26 @@
 }
 
 .po-divider-line {
+    min-width: 0;
     height: 1px;
     flex: 1;
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent);
+}
+
+.po-divider-line.po-divider-pattern {
+    position: relative;
+    height: 1.4em;
+    overflow: hidden;
+    background: none;
+    opacity: .55;
+    font-size: .75rem;
+}
+
+.po-divider-pattern > span {
+    position: absolute;
+    inset: 0 auto auto 0;
+    white-space: pre;
+    line-height: 1.4;
 }
 
 .po-fold {

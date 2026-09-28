@@ -1,7 +1,7 @@
 {
   "display_name": "접어",
   "name": "Prompt_Organizer",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "SillyTavern Chat Completion Prompt Manager의 구분선, 접기, 검색 및 빠른 범위 선택 UI 확장.",
   "js": "index.js",
   "css": "style.css",
